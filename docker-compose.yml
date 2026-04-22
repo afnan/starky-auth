@@ -39,22 +39,17 @@ services:
 
   # Keycloak Identity Provider
   keycloak:
-    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.1}
+    image: ${IMAGE:-starkyacr.azurecr.io/starky-auth:latest}
     container_name: keycloak-server
     restart: unless-stopped
+    # kc.sh start --optimized is baked into the Dockerfile ENTRYPOINT.
+    # These flags are runtime SPI options (not build-time).
     command:
-      - start
-      - --proxy-headers=xforwarded
-      - --http-enabled=true
-      - --http-port=8080
-      - --health-enabled=true
-      - --metrics-enabled=true
       - --spi-theme-static-max-age=2592000
       - --spi-theme-cache-themes=${KC_THEME_CACHING:-true}
       - --spi-theme-cache-templates=${KC_THEME_CACHING:-true}
     environment:
-      # Database
-      KC_DB: postgres
+      # Database (runtime connection — KC_DB=postgres is baked at build time)
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       KC_DB_USERNAME: ${POSTGRES_USER}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
@@ -73,15 +68,9 @@ services:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
 
-      # Single-node cache
-      KC_CACHE: local
-
       # DB pool
       KC_DB_POOL_MIN_SIZE: 5
       KC_DB_POOL_MAX_SIZE: 20
-
-      # Features
-      KC_FEATURES: ${KEYCLOAK_FEATURES:-token-exchange,admin-fine-grained-authz}
 
       # Logging
       KC_LOG_LEVEL: ${KEYCLOAK_LOG_LEVEL:-INFO}
@@ -99,7 +88,6 @@ services:
     volumes:
       - keycloak_data:/opt/keycloak/data
       - ./import:/opt/keycloak/data/import:ro
-      - ./themes:/opt/keycloak/themes:ro
     networks:
       - keycloak-network
     depends_on:

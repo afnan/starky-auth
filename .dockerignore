@@ -1,28 +1,44 @@
 # Git
 .git
 .gitignore
+.github
 
-# Environment files
+# Specs and runbooks
+docs/
+
+# Tailwind source (not needed in image — only login/ gets copied)
+themes/starky/src
+themes/starky/package*.json
+themes/starky/tailwind.config.js
+themes/starky/postcss.config.js
+themes/starky/.gitignore
+themes/starky/node_modules
+
+# Secrets and local env
 .env
 .env.local
 .env.*.local
+
+# Repo plumbing not needed in the image
+env.example
+README.md
+setup.sh
+backup.sh
+docker-compose.yml
+docker-compose.override.yml*
+caddy/
 
 # Backups
 backups/
 *.sql
 *.sql.gz
 
-# Logs
-*.log
-logs/
-
-# IDE
+# IDE / OS
 .vscode/
 .idea/
 *.swp
-*.swo
-*~
-
-# OS
 .DS_Store
 Thumbs.db
+
+# Claude scratch
+.claude*

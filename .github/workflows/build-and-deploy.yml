@@ -168,14 +168,15 @@ jobs:
       - name: Deploy to VM
         run: |
           NEW_IMAGE="${IMAGE_REPO}:${{ github.sha }}"
+          # Authenticate docker to ACR via IMDS directly (bypasses 'az acr login'
+          # which needs subscription-level metadata access — the UAMI only has
+          # resource-scoped AcrPull, no subscription role).
           DEPLOY_SCRIPT=$(cat <<EOF
           set -eu
           cd ${VM_APP_DIR}
-          # Refresh ACR credentials (~3h TTL otherwise).
-          # --allow-no-subscriptions: the UAMI only has resource-scoped roles
-          # (AcrPull, Storage Blob Data Contributor), no subscription role.
-          az login --identity --allow-no-subscriptions >/dev/null
-          az acr login --name starkyacr >/dev/null
+          MGMT_TOKEN=\$(curl -sS -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['access_token'])")
+          REFRESH_TOKEN=\$(curl -sS -X POST -d "grant_type=access_token&service=starkyacr.azurecr.io&access_token=\${MGMT_TOKEN}" "https://starkyacr.azurecr.io/oauth2/exchange" | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['refresh_token'])")
+          echo "\${REFRESH_TOKEN}" | docker login starkyacr.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password-stdin
           docker compose pull
           docker compose up -d
           docker image prune -f --filter "until=168h" >/dev/null

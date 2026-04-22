@@ -69,6 +69,59 @@ jobs:
           docker push "${IMAGE_REPO}:${{ github.sha }}"
           docker push "${IMAGE_REPO}:latest"
 
+      - name: Ensure VM prerequisites (idempotent — fast path when already installed)
+        run: |
+          BOOTSTRAP_SCRIPT=$(cat <<'EOF'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          # Docker
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y ca-certificates curl gnupg
+            curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+            sh /tmp/get-docker.sh
+            rm /tmp/get-docker.sh
+          fi
+
+          # Docker Compose plugin
+          if ! docker compose version >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y docker-compose-plugin
+          fi
+
+          # azcopy (used later by backup.sh)
+          if ! command -v azcopy >/dev/null 2>&1; then
+            curl -fsSL https://aka.ms/downloadazcopy-v10-linux -o /tmp/azcopy.tgz
+            tar -xzf /tmp/azcopy.tgz -C /tmp/
+            mv /tmp/azcopy_linux_amd64_*/azcopy /usr/local/bin/
+            chmod +x /usr/local/bin/azcopy
+            rm -rf /tmp/azcopy.tgz /tmp/azcopy_linux_amd64_*
+          fi
+
+          # az CLI (needed for ACR login during deploy)
+          if ! command -v az >/dev/null 2>&1; then
+            curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+          fi
+
+          mkdir -p /opt/starky-auth/caddy /opt/starky-auth/import /opt/starky-auth/backups
+          echo "bootstrap-ok"
+          EOF
+          )
+          output=$(az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${BOOTSTRAP_SCRIPT}" \
+            --query "value[0].message" -o tsv)
+          echo "----- bootstrap output -----"
+          echo "${output}"
+          echo "----------------------------"
+          if ! echo "${output}" | grep -q "bootstrap-ok"; then
+            echo "VM bootstrap failed."
+            exit 1
+          fi
+
       - name: Sync config + env to VM
         env:
           VM_ENV_FILE: ${{ secrets.VM_ENV_FILE }}

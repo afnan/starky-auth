@@ -130,7 +130,10 @@ jobs:
 
           # Compose the full .env content: secret body + IMAGE line.
           # printf preserves the secret's $-literals (no re-expansion).
-          printf '%s\n' "$VM_ENV_FILE" > /tmp/env_body
+          # tr -d '\r' strips Windows-style CRLF that GitHub's secret form
+          # may preserve if the user pasted from a Windows clipboard.
+          # Caddy's Caddyfile env interpolation breaks silently if values have \r.
+          printf '%s\n' "$VM_ENV_FILE" | tr -d '\r' > /tmp/env_body
           printf 'IMAGE=%s\n' "${NEW_IMAGE}" >> /tmp/env_body
           ENV_B64=$(base64 -w0 < /tmp/env_body)
 
@@ -214,4 +217,45 @@ jobs:
             sleep 10
           done
           echo "Timeout: Keycloak did not report healthy within 240s."
+          exit 1
+
+      - name: Diagnose Caddy and verify external reachability
+        run: |
+          # Show container states + Caddy logs so pipeline logs tell us
+          # everything we need if the external probe fails.
+          DIAG_SCRIPT='
+          echo "=== containers ==="
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo
+          echo "=== listening ports ==="
+          ss -tlnp 2>/dev/null | head -20
+          echo
+          echo "=== caddy last 50 log lines ==="
+          docker compose -f /opt/starky-auth/docker-compose.yml logs --tail 50 caddy 2>&1 || echo "(caddy logs unavailable)"
+          echo
+          echo "=== /opt/starky-auth/.env var names (values redacted) ==="
+          awk -F= "/^[A-Z]/ {print \$1}" /opt/starky-auth/.env
+          '
+          az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${DIAG_SCRIPT}" \
+            --query "value[0].message" -o tsv
+
+          # External probe — retry for up to ~90s to allow Let's Encrypt
+          # cert acquisition on first deploy.
+          echo
+          echo "=== external reachability probe ==="
+          for attempt in $(seq 1 18); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+              https://auth.starkyapp.com/health || echo "timeout")
+            echo "Attempt ${attempt}: https://auth.starkyapp.com/health -> ${code}"
+            if [ "${code}" = "200" ]; then
+              echo "External reachability OK."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "External probe failed — Caddy is not serving 443. Check the diag output above."
           exit 1

@@ -134,18 +134,21 @@ jobs:
           printf 'IMAGE=%s\n' "${NEW_IMAGE}" >> /tmp/env_body
           ENV_B64=$(base64 -w0 < /tmp/env_body)
 
-          # The repo's compose + Caddy config sync to the VM on every deploy,
-          # keeping repo and VM lockstep — no drift.
+          # The repo's compose, Caddy config, and deploy script sync to the VM
+          # on every deploy, keeping repo and VM lockstep — no drift.
           COMPOSE_B64=$(base64 -w0 < docker-compose.yml)
           CADDY_B64=$(base64 -w0 < caddy/Caddyfile)
+          DEPLOY_B64=$(base64 -w0 < scripts/deploy.sh)
 
           SYNC_SCRIPT=$(cat <<EOF
           set -eu
-          mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups
+          mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups ${VM_APP_DIR}/scripts
           echo '${COMPOSE_B64}' | base64 -d > ${VM_APP_DIR}/docker-compose.yml
           echo '${CADDY_B64}' | base64 -d > ${VM_APP_DIR}/caddy/Caddyfile
           echo '${ENV_B64}' | base64 -d > ${VM_APP_DIR}/.env
+          echo '${DEPLOY_B64}' | base64 -d > ${VM_APP_DIR}/scripts/deploy.sh
           chmod 600 ${VM_APP_DIR}/.env
+          chmod +x ${VM_APP_DIR}/scripts/deploy.sh
           echo "sync-ok"
           EOF
           )
@@ -168,21 +171,10 @@ jobs:
       - name: Deploy to VM
         run: |
           NEW_IMAGE="${IMAGE_REPO}:${{ github.sha }}"
-          # Authenticate docker to ACR via IMDS directly (bypasses 'az acr login'
-          # which needs subscription-level metadata access — the UAMI only has
-          # resource-scoped AcrPull, no subscription role).
-          DEPLOY_SCRIPT=$(cat <<EOF
-          set -eu
-          cd ${VM_APP_DIR}
-          MGMT_TOKEN=\$(curl -sS -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['access_token'])")
-          REFRESH_TOKEN=\$(curl -sS -X POST -d "grant_type=access_token&service=starkyacr.azurecr.io&access_token=\${MGMT_TOKEN}" "https://starkyacr.azurecr.io/oauth2/exchange" | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['refresh_token'])")
-          echo "\${REFRESH_TOKEN}" | docker login starkyacr.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password-stdin
-          docker compose pull
-          docker compose up -d
-          docker image prune -f --filter "until=168h" >/dev/null
-          echo "deploy-ok image=${NEW_IMAGE}"
-          EOF
-          )
+          # Invoke the deploy script that the sync step placed on the VM.
+          # Keeping the script in the repo (scripts/deploy.sh) means it's plain
+          # bash with no heredoc-escaping gymnastics.
+          DEPLOY_SCRIPT="set -e; bash ${VM_APP_DIR}/scripts/deploy.sh '${NEW_IMAGE}'"
           output=$(az vm run-command invoke \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${VM_NAME}" \

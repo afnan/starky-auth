@@ -140,14 +140,21 @@ jobs:
           CADDY_B64=$(base64 -w0 < caddy/Caddyfile)
           DEPLOY_B64=$(base64 -w0 < scripts/deploy.sh)
 
+          # The runner already did `az acr login` — its ~/.docker/config.json
+          # has a valid ACR refresh token (3h TTL). Ship that to the VM so the
+          # VM doesn't need to authenticate to ACR itself. Every deploy
+          # refreshes the token, so expiry is a non-issue in practice.
+          DOCKER_CFG_B64=$(base64 -w0 < ~/.docker/config.json)
+
           SYNC_SCRIPT=$(cat <<EOF
           set -eu
-          mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups ${VM_APP_DIR}/scripts
+          mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups ${VM_APP_DIR}/scripts /root/.docker
           echo '${COMPOSE_B64}' | base64 -d > ${VM_APP_DIR}/docker-compose.yml
           echo '${CADDY_B64}' | base64 -d > ${VM_APP_DIR}/caddy/Caddyfile
           echo '${ENV_B64}' | base64 -d > ${VM_APP_DIR}/.env
           echo '${DEPLOY_B64}' | base64 -d > ${VM_APP_DIR}/scripts/deploy.sh
-          chmod 600 ${VM_APP_DIR}/.env
+          echo '${DOCKER_CFG_B64}' | base64 -d > /root/.docker/config.json
+          chmod 600 ${VM_APP_DIR}/.env /root/.docker/config.json
           chmod +x ${VM_APP_DIR}/scripts/deploy.sh
           echo "sync-ok"
           EOF

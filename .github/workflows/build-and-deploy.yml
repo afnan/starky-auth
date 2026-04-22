@@ -1,0 +1,162 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: starky-auth-deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write  # required for Azure OIDC federation
+  contents: read
+
+env:
+  IMAGE_REPO: starkyacr.azurecr.io/starky-auth
+  RESOURCE_GROUP: rg-starkyapp
+  VM_NAME: vm-starky-auth-prod
+  VM_APP_DIR: /opt/starky-auth
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: themes/starky/package-lock.json
+
+      - name: Install theme dependencies
+        working-directory: themes/starky
+        run: npm ci
+
+      - name: Build Tailwind CSS
+        working-directory: themes/starky
+        run: npm run build:css
+
+      - name: Verify built CSS exists
+        run: |
+          test -s themes/starky/login/resources/css/styles.css
+          echo "Built CSS size: $(wc -c < themes/starky/login/resources/css/styles.css) bytes"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name starkyacr
+
+      - name: Docker build
+        run: |
+          docker build \
+            --tag "${IMAGE_REPO}:${{ github.sha }}" \
+            --tag "${IMAGE_REPO}:latest" \
+            .
+
+      - name: Docker push
+        run: |
+          docker push "${IMAGE_REPO}:${{ github.sha }}"
+          docker push "${IMAGE_REPO}:latest"
+
+      - name: Sync config + env to VM
+        env:
+          VM_ENV_FILE: ${{ secrets.VM_ENV_FILE }}
+        run: |
+          NEW_IMAGE="${IMAGE_REPO}:${{ github.sha }}"
+
+          # Compose the full .env content: secret body + IMAGE line.
+          # printf preserves the secret's $-literals (no re-expansion).
+          printf '%s\n' "$VM_ENV_FILE" > /tmp/env_body
+          printf 'IMAGE=%s\n' "${NEW_IMAGE}" >> /tmp/env_body
+          ENV_B64=$(base64 -w0 < /tmp/env_body)
+
+          # The repo's compose + Caddy config sync to the VM on every deploy,
+          # keeping repo and VM lockstep — no drift.
+          COMPOSE_B64=$(base64 -w0 < docker-compose.yml)
+          CADDY_B64=$(base64 -w0 < caddy/Caddyfile)
+
+          SYNC_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+          mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups
+          echo '${COMPOSE_B64}' | base64 -d > ${VM_APP_DIR}/docker-compose.yml
+          echo '${CADDY_B64}' | base64 -d > ${VM_APP_DIR}/caddy/Caddyfile
+          echo '${ENV_B64}' | base64 -d > ${VM_APP_DIR}/.env
+          chmod 600 ${VM_APP_DIR}/.env
+          echo "sync-ok"
+          EOF
+          )
+          output=$(az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${SYNC_SCRIPT}" \
+            --query "value[0].message" -o tsv)
+          echo "----- sync output -----"
+          echo "${output}"
+          echo "-----------------------"
+          if ! echo "${output}" | grep -q "sync-ok"; then
+            echo "Config sync failed — missing sync-ok sentinel."
+            exit 1
+          fi
+
+          rm -f /tmp/env_body
+
+      - name: Deploy to VM
+        run: |
+          NEW_IMAGE="${IMAGE_REPO}:${{ github.sha }}"
+          DEPLOY_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+          cd ${VM_APP_DIR}
+          # Refresh ACR credentials (~3h TTL otherwise).
+          az login --identity >/dev/null
+          az acr login --name starkyacr >/dev/null
+          docker compose pull
+          docker compose up -d
+          docker image prune -f --filter "until=168h" >/dev/null
+          echo "deploy-ok image=${NEW_IMAGE}"
+          EOF
+          )
+          output=$(az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${DEPLOY_SCRIPT}" \
+            --query "value[0].message" -o tsv)
+          echo "----- vm output -----"
+          echo "${output}"
+          echo "---------------------"
+          if ! echo "${output}" | grep -q "deploy-ok image=${NEW_IMAGE}"; then
+            echo "Deploy script did not complete successfully — missing deploy-ok sentinel."
+            exit 1
+          fi
+
+      - name: Wait for Keycloak health
+        run: |
+          HEALTH_SCRIPT='docker inspect --format="{{.State.Health.Status}}" keycloak-server 2>/dev/null || echo missing'
+          for attempt in $(seq 1 24); do
+            status=$(az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${HEALTH_SCRIPT}" \
+              --query "value[0].message" -o tsv | tr -d '[:space:]')
+            echo "Attempt ${attempt}: container health = ${status}"
+            if echo "${status}" | grep -q healthy; then
+              echo "Keycloak is healthy."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timeout: Keycloak did not report healthy within 240s."
+          exit 1

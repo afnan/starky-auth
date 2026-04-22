@@ -4,8 +4,9 @@
 
 # ============================================================
 # Public authentication domain
-# Serves landing page at /, proxies realm endpoints to Keycloak.
+# Redirects / to the product site. Proxies realm endpoints to Keycloak.
 # Admin console is BLOCKED here — use the admin subdomain.
+# Master realm is BLOCKED here — not needed for end-user auth.
 # ============================================================
 {$AUTH_HOSTNAME} {
     encode gzip
@@ -20,24 +21,26 @@
         -Server
     }
 
-    # Simple health endpoint (Caddy-local, doesn't hit Keycloak)
+    # Caddy-local health endpoint (doesn't hit Keycloak)
     @health path /health
     handle @health {
         respond "healthy" 200
     }
 
-    # Landing page at root only
+    # Root → product site
     @root path /
-    handle @root {
-        root * /srv
-        try_files /landing.html
-        file_server
-    }
+    redir @root https://starkyapp.com 302
 
     # Block admin console on the public domain
     @admin path /admin /admin/*
     handle @admin {
         respond "Admin access is not permitted on this domain. Use the admin subdomain." 403
+    }
+
+    # Block master realm on the public domain (end users live in other realms)
+    @master path /realms/master /realms/master/*
+    handle @master {
+        respond "Not found" 404
     }
 
     # Everything else → Keycloak

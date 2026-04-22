@@ -132,7 +132,6 @@ services:
       ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-127.0.0.1/32}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/landing.html:/srv/landing.html:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

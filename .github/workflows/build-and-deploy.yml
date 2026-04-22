@@ -172,7 +172,9 @@ jobs:
           set -eu
           cd ${VM_APP_DIR}
           # Refresh ACR credentials (~3h TTL otherwise).
-          az login --identity >/dev/null
+          # --allow-no-subscriptions: the UAMI only has resource-scoped roles
+          # (AcrPull, Storage Blob Data Contributor), no subscription role.
+          az login --identity --allow-no-subscriptions >/dev/null
           az acr login --name starkyacr >/dev/null
           docker compose pull
           docker compose up -d

@@ -72,7 +72,7 @@ jobs:
       - name: Ensure VM prerequisites (idempotent — fast path when already installed)
         run: |
           BOOTSTRAP_SCRIPT=$(cat <<'EOF'
-          set -euo pipefail
+          set -eu
           export DEBIAN_FRONTEND=noninteractive
 
           # Docker
@@ -140,7 +140,7 @@ jobs:
           CADDY_B64=$(base64 -w0 < caddy/Caddyfile)
 
           SYNC_SCRIPT=$(cat <<EOF
-          set -euo pipefail
+          set -eu
           mkdir -p ${VM_APP_DIR}/caddy ${VM_APP_DIR}/import ${VM_APP_DIR}/backups
           echo '${COMPOSE_B64}' | base64 -d > ${VM_APP_DIR}/docker-compose.yml
           echo '${CADDY_B64}' | base64 -d > ${VM_APP_DIR}/caddy/Caddyfile
@@ -169,7 +169,7 @@ jobs:
         run: |
           NEW_IMAGE="${IMAGE_REPO}:${{ github.sha }}"
           DEPLOY_SCRIPT=$(cat <<EOF
-          set -euo pipefail
+          set -eu
           cd ${VM_APP_DIR}
           # Refresh ACR credentials (~3h TTL otherwise).
           az login --identity >/dev/null

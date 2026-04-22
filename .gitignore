@@ -1,0 +1,38 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Backups
+backups/
+*.sql
+*.sql.gz
+
+# Logs
+*.log
+logs/
+
+# Docker local volumes
+postgres_data/
+keycloak_data/
+caddy_data/
+caddy_config/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / Tailwind build output
+node_modules/
+themes/*/login/resources/css/styles.css
+themes/*/login/resources/css/*.min.css
+
+# Claude Code scratch
+.claude*

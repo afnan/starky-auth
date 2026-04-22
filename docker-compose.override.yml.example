@@ -1,0 +1,17 @@
+# DEVELOPMENT ONLY — do NOT use in production.
+# Copy to docker-compose.override.yml (picked up automatically by `docker compose`).
+
+services:
+  keycloak:
+    environment:
+      # Verbose logging — noisy, slow, leaks details. Dev-only.
+      KC_LOG_LEVEL: DEBUG
+      KC_ROOT_LOG_LEVEL: DEBUG
+    # Expose Keycloak directly (bypass Caddy) for local debugging.
+    # ports:
+    #   - "8080:8080"
+
+  # Expose Postgres to the host for external tools (pgAdmin, psql, etc.)
+  # postgres:
+  #   ports:
+  #     - "5432:5432"

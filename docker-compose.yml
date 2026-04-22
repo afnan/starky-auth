@@ -1,0 +1,160 @@
+services:
+  # PostgreSQL Database for Keycloak
+  postgres:
+    image: postgres:16-alpine
+    container_name: keycloak-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - keycloak-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c max_connections=200
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.1}
+    container_name: keycloak-server
+    restart: unless-stopped
+    command:
+      - start
+      - --proxy-headers=xforwarded
+      - --http-enabled=true
+      - --http-port=8080
+      - --health-enabled=true
+      - --metrics-enabled=true
+      - --spi-theme-static-max-age=2592000
+      - --spi-theme-cache-themes=${KC_THEME_CACHING:-true}
+      - --spi-theme-cache-templates=${KC_THEME_CACHING:-true}
+    environment:
+      # Database
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # Hostnames (derived from bare hostnames in .env)
+      KC_HOSTNAME: https://${AUTH_HOSTNAME}
+      KC_HOSTNAME_ADMIN: https://${ADMIN_HOSTNAME}
+      KC_HOSTNAME_STRICT: false
+
+      # Proxy
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: true
+      KC_HTTP_PORT: 8080
+
+      # Admin credentials
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      # Single-node cache
+      KC_CACHE: local
+
+      # DB pool
+      KC_DB_POOL_MIN_SIZE: 5
+      KC_DB_POOL_MAX_SIZE: 20
+
+      # Features
+      KC_FEATURES: ${KEYCLOAK_FEATURES:-token-exchange,admin-fine-grained-authz}
+
+      # Logging
+      KC_LOG_LEVEL: ${KEYCLOAK_LOG_LEVEL:-INFO}
+      KC_ROOT_LOG_LEVEL: ${KEYCLOAK_ROOT_LOG_LEVEL:-INFO}
+
+      # JVM
+      JAVA_OPTS_APPEND: >-
+        -Xms512m
+        -Xmx2048m
+        -XX:MetaspaceSize=96M
+        -XX:MaxMetaspaceSize=256m
+        -Djava.awt.headless=true
+        -Djava.security.egd=file:/dev/./urandom
+        -Djboss.modules.system.pkgs=org.jboss.byteman
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./import:/opt/keycloak/data/import:ro
+      - ./themes:/opt/keycloak/themes:ro
+    networks:
+      - keycloak-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' | nc localhost 9000 | grep -q UP"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Caddy — reverse proxy with automatic Let's Encrypt TLS
+  caddy:
+    image: caddy:2-alpine
+    container_name: keycloak-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      AUTH_HOSTNAME: ${AUTH_HOSTNAME}
+      ADMIN_HOSTNAME: ${ADMIN_HOSTNAME}
+      ACME_EMAIL: ${ACME_EMAIL}
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-127.0.0.1/32}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/landing.html:/srv/landing.html:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - keycloak-network
+    depends_on:
+      - keycloak
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  keycloak-network:
+    driver: bridge

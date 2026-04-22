@@ -1,0 +1,73 @@
+{
+    email {$ACME_EMAIL}
+}
+
+# ============================================================
+# Public authentication domain
+# Serves landing page at /, proxies realm endpoints to Keycloak.
+# Admin console is BLOCKED here — use the admin subdomain.
+# ============================================================
+{$AUTH_HOSTNAME} {
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; frame-src 'self'; frame-ancestors 'self'; form-action 'self' https:;"
+        -Server
+    }
+
+    # Simple health endpoint (Caddy-local, doesn't hit Keycloak)
+    @health path /health
+    handle @health {
+        respond "healthy" 200
+    }
+
+    # Landing page at root only
+    @root path /
+    handle @root {
+        root * /srv
+        try_files /landing.html
+        file_server
+    }
+
+    # Block admin console on the public domain
+    @admin path /admin /admin/*
+    handle @admin {
+        respond "Admin access is not permitted on this domain. Use the admin subdomain." 403
+    }
+
+    # Everything else → Keycloak
+    handle {
+        reverse_proxy keycloak:8080
+    }
+}
+
+# ============================================================
+# Admin console — IP-restricted
+# ADMIN_ALLOWED_IPS is a space-separated list of IPs/CIDRs.
+# Default (127.0.0.1/32) denies every real client.
+# ============================================================
+{$ADMIN_HOSTNAME} {
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    @allowed remote_ip {$ADMIN_ALLOWED_IPS}
+    handle @allowed {
+        reverse_proxy keycloak:8080
+    }
+
+    handle {
+        respond "Access denied. Your IP is not in the admin allow-list." 403
+    }
+}

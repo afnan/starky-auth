@@ -1,0 +1,12 @@
+{
+  "name": "starky-theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Keycloak theme for Starky — Tailwind-built CSS, FTL overrides.",
+  "scripts": {
+    "build:css": "tailwindcss -i src/input.css -o login/resources/css/styles.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

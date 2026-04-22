@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * v1 branding — targets Keycloak's default login HTML structure.
+ * Expanded FTL overrides (login.ftl, register.ftl, etc.) are future work;
+ * today this acts as a colour / typography overlay on the parent theme.
+ */
+
+body {
+  @apply bg-starky-bg text-starky-fg;
+}
+
+a {
+  @apply text-starky-accent hover:underline;
+}
+
+h1, h2, h3 {
+  @apply font-semibold;
+}

@@ -226,6 +226,31 @@ jobs:
           echo "Timeout: Keycloak did not report healthy within 240s."
           exit 1
 
+      # `if: failure()` runs this step only when a prior step failed
+      # (i.e. when the health gate above timed out). Dumps the real
+      # cause into the same run log so we don't need a separate diag
+      # round-trip to find out why Keycloak didn't come up.
+      # Read-only: `docker ps`, `docker inspect`, `docker logs`.
+      - name: On-failure — dump keycloak-server logs + health probe outputs
+        if: failure()
+        run: |
+          DIAG_SCRIPT='
+          echo "=== docker ps ==="
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo
+          echo "=== keycloak-server last 10 health probe outputs ==="
+          docker inspect --format "{{range .State.Health.Log}}exit={{.ExitCode}} out={{.Output}}{{println}}{{end}}" keycloak-server 2>/dev/null | tail -10 || true
+          echo
+          echo "=== keycloak-server last 100 container log lines ==="
+          docker logs --tail 100 keycloak-server 2>&1 || echo "(logs unavailable)"
+          '
+          az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${DIAG_SCRIPT}" \
+            --query "value[0].message" -o tsv
+
       - name: Diagnose Caddy and verify external reachability
         run: |
           # Show container states + Caddy logs so pipeline logs tell us

@@ -1,0 +1,172 @@
+# ===================================================================
+# Refresh Caddy certs — one-shot, manually-triggered.
+#
+# PURPOSE
+#   When Caddy's ACME flow has failed repeatedly (as it did for 24h
+#   while our NSG was blocking port 80), Caddy enters exponential
+#   backoff; the next automatic retry can be hours away. The simplest,
+#   safest way to force an immediate retry is to restart the Caddy
+#   container — on boot, certmagic re-runs ACME for every configured
+#   hostname right away.
+#
+# WHAT THIS WORKFLOW DOES
+#   1. Azure OIDC login (same SP as deploy).
+#   2. BEFORE the restart, dumps:
+#        - `docker ps` (confirm caddy exists and is up)
+#        - `ls /data/caddy/certificates/` inside the Caddy container
+#          (shows which cert dirs exist — if any)
+#        - last 20 lines of Caddy logs (audit: what state was Caddy in?)
+#   3. `docker restart keycloak-caddy` — ~10 seconds of reverse-proxy
+#      downtime. NOTHING else touched: Keycloak, Postgres, volumes,
+#      `.env`, Caddyfile — all unaffected.
+#   4. Waits 20 seconds for Caddy to boot and kick off ACME.
+#   5. AFTER the restart, dumps:
+#        - `docker ps` again
+#        - cert directory listing again (should now contain a cert for
+#          auth.starkyapp.com if ACME succeeded)
+#        - last 50 lines of Caddy logs (should include fresh "trying
+#          to solve challenge" → "certificate obtained successfully"
+#          lines now that port 80 is reachable)
+#   6. External probe from the GitHub runner:
+#        `curl -sS -o /dev/null -w '%{http_code}' https://auth.starkyapp.com/health`
+#      Polled for ~60s to allow ACME to complete. Any 2xx/3xx/4xx
+#      response means the TLS handshake succeeded — the cert is valid.
+#      Only 000/timeout means we're still broken.
+#
+# WHAT THIS WORKFLOW DOES NOT DO
+#   - Does not `docker compose down`, nor remove any container.
+#   - Does not delete, wipe, or recreate any volume. In particular:
+#     `caddy_data` is preserved — it contains Caddy's ACME account key
+#     and any partially-issued cert state. Wiping it would force a new
+#     ACME account registration and potentially hit Let's Encrypt
+#     rate limits (5 duplicate certs / 7 days / hostname).
+#   - Does not change the Caddyfile, `.env`, or any NSG rule.
+#   - Does not build or push any image.
+#
+# ROLLBACK
+#   Not applicable — the only runtime change is a container restart
+#   (~10s of downtime). If Caddy fails to come back, `docker start
+#   keycloak-caddy` or `docker compose -f /opt/starky-auth/docker-compose.yml
+#   up -d caddy` brings it back using the same (unchanged) image +
+#   config.
+#
+# HOW TO RUN
+#   GitHub → Actions → "Refresh Caddy certs" → Run workflow.
+# ===================================================================
+
+name: Refresh Caddy certs
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-starkyapp
+  VM_NAME: vm-starky-auth-prod
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # -------------------------------------------------------------
+      # Audit: show state BEFORE restart. Read-only — no change.
+      # -------------------------------------------------------------
+      - name: Pre-restart audit (docker ps, cert dirs, last 20 log lines)
+        run: |
+          set -eu
+          SCRIPT='
+          echo "=== docker ps ==="
+          docker ps --format "table {{.Names}}\t{{.Status}}"
+          echo
+          echo "=== cert directories currently on disk inside Caddy ==="
+          docker exec keycloak-caddy sh -c "find /data/caddy/certificates -maxdepth 3 -type d 2>/dev/null" || echo "(no certificates dir yet)"
+          echo
+          echo "=== keycloak-caddy last 20 log lines ==="
+          docker logs --tail 20 keycloak-caddy 2>&1 || true
+          '
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$SCRIPT" \
+            --query "value[0].message" -o tsv
+
+      # -------------------------------------------------------------
+      # The only mutating step: restart Caddy. Preserves volumes.
+      # -------------------------------------------------------------
+      - name: Restart keycloak-caddy container
+        run: |
+          set -eu
+          SCRIPT='
+          docker restart keycloak-caddy
+          echo "restart-done"
+          '
+          output=$(az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$SCRIPT" \
+            --query "value[0].message" -o tsv)
+          echo "${output}"
+          if ! echo "${output}" | grep -q restart-done; then
+            echo "Restart command did not complete successfully."
+            exit 1
+          fi
+
+      - name: Sleep 20s to let Caddy boot and start ACME
+        run: sleep 20
+
+      # -------------------------------------------------------------
+      # Audit: show state AFTER restart. Should include fresh ACME
+      # lines — "obtained certificate" is the happy-path marker.
+      # -------------------------------------------------------------
+      - name: Post-restart audit (docker ps, cert dirs, last 50 log lines)
+        run: |
+          set -eu
+          SCRIPT='
+          echo "=== docker ps ==="
+          docker ps --format "table {{.Names}}\t{{.Status}}"
+          echo
+          echo "=== cert directories on disk ==="
+          docker exec keycloak-caddy sh -c "find /data/caddy/certificates -maxdepth 3 -type d 2>/dev/null" || echo "(not readable yet)"
+          echo
+          echo "=== keycloak-caddy last 50 log lines ==="
+          docker logs --tail 50 keycloak-caddy 2>&1 || true
+          '
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$SCRIPT" \
+            --query "value[0].message" -o tsv
+
+      # -------------------------------------------------------------
+      # External truth check: does TLS actually work from the outside
+      # now? 60s of retries gives ACME plenty of time to finish.
+      # Any non-timeout response = TLS handshake succeeded.
+      # -------------------------------------------------------------
+      - name: External HTTPS probe (up to 60s)
+        run: |
+          set -eu
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+              https://auth.starkyapp.com/health || echo "timeout")
+            echo "Attempt ${attempt}: https://auth.starkyapp.com/health -> ${code}"
+            case "$code" in
+              timeout|000) sleep 5 ;;
+              *) echo "TLS OK — Caddy is serving a valid cert."; exit 0 ;;
+            esac
+          done
+          echo "Still no valid cert after 60s. Check the post-restart log dump above."
+          exit 1

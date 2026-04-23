@@ -1,0 +1,197 @@
+# ===================================================================
+# Diagnostic workflow — READ-ONLY.
+#
+# PURPOSE
+#   The production deploy (build-and-deploy.yml) keeps failing at the
+#   "Diagnose Caddy and verify external reachability" step. Caddy logs
+#   show Let's Encrypt cannot connect to the VM on port 80 ("Timeout
+#   during connect (likely firewall problem)"). That strongly implicates
+#   the Azure Network Security Group (NSG) fronting the VM — but we want
+#   proof, not assumptions, before we change anything.
+#
+# WHAT THIS WORKFLOW DOES
+#   1. Logs in to Azure with the same OIDC service principal the deploy
+#      workflow uses. No new secrets required.
+#   2. Finds the VM's network interface (NIC) and the NSG attached to
+#      either the NIC or its subnet.
+#   3. Prints every inbound rule on that NSG as a table — so we can see
+#      exactly which ports are allowed from the internet.
+#   4. Prints the VM's public IP + associations (so we confirm DNS is
+#      pointed at the right address).
+#   5. Runs TWO read-only shell checks on the VM itself via
+#      `az vm run-command invoke` (no SSH needed):
+#        a. `ss -tlnp` → what ports the VM is actually listening on
+#        b. `docker ps` + `docker inspect keycloak-server` health state
+#           + last 30 lines of Caddy logs → confirms the *internal* state
+#      These are READ-ONLY — they do not restart or change any container,
+#      do not write any file, and do not touch the network.
+#
+# WHAT THIS WORKFLOW DOES NOT DO
+#   - No NSG rule is created, deleted, or modified.
+#   - No VM configuration (UFW, Docker, containers, .env) is changed.
+#   - No images are built or pushed.
+#   - No deploy is triggered.
+#   Worst case if this workflow fails mid-run: nothing on the VM or in
+#   Azure is left in a different state than before it ran.
+#
+# HOW TO RUN
+#   GitHub → Actions → "Diag (read-only)" → Run workflow (on main).
+#   Then share the run logs and we'll have the exact rules + listen state.
+# ===================================================================
+
+name: Diag (read-only)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # same OIDC federation the deploy workflow uses
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-starkyapp
+  VM_NAME: vm-starky-auth-prod
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Azure login (OIDC) — reuses the same service principal as deploy
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # -------------------------------------------------------------
+      # Find the NIC attached to the VM, then the NSG attached to
+      # either the NIC or the NIC's subnet. Either placement counts —
+      # Azure evaluates both when a packet hits the VM.
+      # Everything here is `show`/`list` — pure reads.
+      # -------------------------------------------------------------
+      - name: Resolve VM NIC + NSG associations
+        id: resolve
+        run: |
+          set -eu
+          echo "=== VM NIC id ==="
+          NIC_ID=$(az vm show -g "$RESOURCE_GROUP" -n "$VM_NAME" \
+            --query "networkProfile.networkInterfaces[0].id" -o tsv)
+          echo "NIC_ID=$NIC_ID"
+
+          NIC_NAME=$(basename "$NIC_ID")
+          echo "NIC_NAME=$NIC_NAME"
+
+          echo
+          echo "=== NIC-level NSG (may be null — then check subnet NSG below) ==="
+          NIC_NSG_ID=$(az network nic show --ids "$NIC_ID" \
+            --query "networkSecurityGroup.id" -o tsv 2>/dev/null || true)
+          echo "NIC_NSG_ID=${NIC_NSG_ID:-<none>}"
+
+          echo
+          echo "=== Subnet of the NIC ==="
+          SUBNET_ID=$(az network nic show --ids "$NIC_ID" \
+            --query "ipConfigurations[0].subnet.id" -o tsv)
+          echo "SUBNET_ID=$SUBNET_ID"
+
+          echo
+          echo "=== Subnet-level NSG (Azure evaluates NIC-NSG and subnet-NSG together) ==="
+          SUBNET_NSG_ID=$(az network vnet subnet show --ids "$SUBNET_ID" \
+            --query "networkSecurityGroup.id" -o tsv 2>/dev/null || true)
+          echo "SUBNET_NSG_ID=${SUBNET_NSG_ID:-<none>}"
+
+          # Prefer NIC-level NSG if present, else subnet-level.
+          EFFECTIVE_NSG_ID="${NIC_NSG_ID:-$SUBNET_NSG_ID}"
+          if [ -z "$EFFECTIVE_NSG_ID" ]; then
+            echo "No NSG found at NIC or subnet level — that alone would allow traffic."
+            echo "(Nothing to print below; means firewall isn't at Azure layer.)"
+          else
+            NSG_NAME=$(basename "$EFFECTIVE_NSG_ID")
+            echo "EFFECTIVE_NSG_NAME=$NSG_NAME"
+            # Pass to later steps via $GITHUB_OUTPUT (no secrets here, just a name).
+            echo "nsg_name=$NSG_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -------------------------------------------------------------
+      # The key evidence: do NSG inbound rules permit 80 and 443 from
+      # the public internet? If not, we have our root cause.
+      # Still read-only — `rule list` doesn't modify anything.
+      # -------------------------------------------------------------
+      - name: List NSG inbound rules
+        if: steps.resolve.outputs.nsg_name != ''
+        run: |
+          set -eu
+          echo "=== Custom inbound rules on ${{ steps.resolve.outputs.nsg_name }} ==="
+          az network nsg rule list \
+            -g "$RESOURCE_GROUP" \
+            --nsg-name "${{ steps.resolve.outputs.nsg_name }}" \
+            --query "[?direction=='Inbound'].{priority:priority, name:name, access:access, proto:protocol, srcPrefix:sourceAddressPrefix, srcPrefixes:sourceAddressPrefixes, destPorts:destinationPortRanges, destPort:destinationPortRange}" \
+            -o table
+
+          echo
+          echo "=== Default (Azure built-in) inbound rules ==="
+          # These always exist and include the AllowVnetInBound / DenyAllInBound
+          # rules at priorities 65000/65001/65500. Useful to confirm nothing
+          # weird is overriding them.
+          az network nsg rule list \
+            -g "$RESOURCE_GROUP" \
+            --nsg-name "${{ steps.resolve.outputs.nsg_name }}" \
+            --include-default \
+            --query "[?direction=='Inbound' && contains(id, 'defaultSecurityRules')].{priority:priority, name:name, access:access}" \
+            -o table
+
+      # -------------------------------------------------------------
+      # Confirm DNS target: the VM's public IP. The Caddy error already
+      # showed LE reached 20.167.84.219, but we print the authoritative
+      # Azure record so we know nothing has drifted since.
+      # -------------------------------------------------------------
+      - name: Show VM public IP
+        run: |
+          set -eu
+          echo "=== Public IPs in the resource group ==="
+          az network public-ip list -g "$RESOURCE_GROUP" \
+            --query "[].{name:name, ip:ipAddress, assoc:ipConfiguration.id}" \
+            -o table
+
+      # -------------------------------------------------------------
+      # Inside-the-VM view via Azure's run-command (no SSH). All three
+      # commands here are READ-ONLY:
+      #   - `ss -tlnp`   : list TCP listening sockets
+      #   - `docker ps`  : list running containers
+      #   - `docker inspect` : read health state
+      #   - `docker logs --tail` : read the last few log lines
+      # If the VM is listening on 0.0.0.0:80 + 0.0.0.0:443, then any
+      # timeout from the internet is definitely an NSG problem. If it is
+      # NOT listening there, the problem is inside the VM instead.
+      # -------------------------------------------------------------
+      - name: Inside-the-VM listen state + container health (read-only)
+        run: |
+          set -eu
+          DIAG_SCRIPT='
+          echo "=== uname + uptime ==="
+          uname -a; uptime
+          echo
+          echo "=== UFW status (may be inactive — thats expected) ==="
+          (ufw status 2>/dev/null || echo "ufw not installed")
+          echo
+          echo "=== Host TCP listen sockets ==="
+          ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "neither ss nor netstat available"
+          echo
+          echo "=== docker ps ==="
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo
+          echo "=== keycloak-server health ==="
+          docker inspect --format "{{.State.Health.Status}}" keycloak-server 2>/dev/null || echo "not running"
+          echo
+          echo "=== keycloak-server last 20 health probes ==="
+          docker inspect --format "{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{println}}{{end}}" keycloak-server 2>/dev/null | tail -20 || true
+          echo
+          echo "=== keycloak-caddy last 30 log lines ==="
+          docker logs --tail 30 keycloak-caddy 2>&1 || true
+          '
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$DIAG_SCRIPT" \
+            --query "value[0].message" -o tsv

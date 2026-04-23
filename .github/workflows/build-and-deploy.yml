@@ -210,7 +210,14 @@ jobs:
               --scripts "${HEALTH_SCRIPT}" \
               --query "value[0].message" -o tsv | tr -d '[:space:]')
             echo "Attempt ${attempt}: container health = ${status}"
-            if echo "${status}" | grep -q healthy; then
+            # `grep -q healthy` would also match the substring "healthy"
+            # inside "unhealthy" and pass the gate falsely. Use a word-
+            # bounded match so only the exact token "healthy" counts.
+            # (The status blob Azure returns is the run-command-wrapped
+            # "Enablesucceeded:[stdout]<value>[stderr]" after whitespace
+            # stripping — `[` and `]` are non-word chars so word-bounded
+            # matching works correctly.)
+            if echo "${status}" | grep -qw healthy; then
               echo "Keycloak is healthy."
               exit 0
             fi

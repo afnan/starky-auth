@@ -94,7 +94,12 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' | nc localhost 9000 | grep -q UP"]
+      # Keycloak 26 UBI-minimal image ships `curl` but NOT `nc`; the old
+      # netcat-based probe always exited 1 with "nc: command not found",
+      # making the container report `unhealthy` regardless of actual state.
+      # `curl --head -fsS` on the management port is the officially
+      # recommended Keycloak 26+ readiness probe.
+      test: ["CMD-SHELL", "curl --head -fsS http://localhost:9000/health/ready || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

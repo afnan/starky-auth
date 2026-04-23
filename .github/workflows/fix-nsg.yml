@@ -1,0 +1,232 @@
+# ===================================================================
+# Fix NSG — one-shot, manually-triggered network fix.
+#
+# PURPOSE
+#   The diag workflow confirmed: the VM's public IP is Standard SKU,
+#   and no NSG is attached at the NIC or subnet level. Under those
+#   conditions Azure's default posture is deny-all inbound from the
+#   internet, so Caddy never receives the Let's Encrypt HTTP-01
+#   probe and no TLS certificate is ever issued. This workflow
+#   punches two holes in that wall and nothing more.
+#
+# WHAT THIS WORKFLOW DOES (in order)
+#   1. Azure OIDC login using the same SP as the deploy workflow.
+#   2. Looks up the VM's region and NIC id.
+#   3. Safety guard — refuses to proceed if the NIC already has a
+#      DIFFERENT NSG attached. (Protects any manual change a human
+#      may have made via the Portal since the diag ran.)
+#   4. Creates NSG `nsg-vm-starky-auth-prod` in the VM's region.
+#      (Idempotent: `nsg create` is PUT semantics. Safe to re-run.)
+#   5. Ensures two inbound rules exist:
+#        priority 100 — Allow-HTTP   : TCP 80  from Internet
+#        priority 110 — Allow-HTTPS  : TCP 443 from Internet
+#      Each is created only if not already present — this workflow
+#      never overwrites a rule a human previously edited.
+#   6. Attaches the NSG to the VM's NIC.
+#      (Setting the same NSG twice is a no-op.)
+#   7. Prints the final rule list and NIC association for audit.
+#   8. Probes `http://auth.starkyapp.com/health` to confirm packets
+#      now flow. Any HTTP response (200, 308 redirect, 502, etc.)
+#      proves the NSG rule works — only a timeout means it didn't.
+#
+# WHAT THIS WORKFLOW DOES *NOT* DO
+#   - Does not open port 22 (SSH). If you need SSH later, add a
+#     narrowly-scoped rule with a specific source IP.
+#   - Does not touch the subnet NSG slot (we scope to the NIC only).
+#   - Does not build, push, or deploy anything application-side.
+#   - Does not modify any container, volume, `.env`, or Caddyfile.
+#
+# ROLLBACK
+#   To undo this workflow's effect:
+#     az network nic update --ids <NIC_ID> --network-security-group ""
+#     az network nsg delete -g rg-starkyapp -n nsg-vm-starky-auth-prod
+#   No data is at risk — NSG is a stateless filter rule container.
+#
+# HOW TO RUN
+#   GitHub → Actions → "Fix NSG" → Run workflow (on main).
+# ===================================================================
+
+name: Fix NSG
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-starkyapp
+  VM_NAME: vm-starky-auth-prod
+  NSG_NAME: nsg-vm-starky-auth-prod
+
+jobs:
+  fix-nsg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Azure login (OIDC) — same SP as deploy workflow
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # -------------------------------------------------------------
+      # Step 2 + Step 3: resolve VM details and refuse to proceed if
+      # the NIC is already managed by someone else's NSG.
+      # -------------------------------------------------------------
+      - name: Resolve VM region + NIC; guard against foreign NSG
+        id: resolve
+        run: |
+          set -eu
+          LOCATION=$(az vm show -g "$RESOURCE_GROUP" -n "$VM_NAME" --query location -o tsv)
+          NIC_ID=$(az vm show -g "$RESOURCE_GROUP" -n "$VM_NAME" \
+            --query "networkProfile.networkInterfaces[0].id" -o tsv)
+          echo "location=$LOCATION"
+          echo "nic_id=$NIC_ID"
+          echo "location=$LOCATION" >> "$GITHUB_OUTPUT"
+          echo "nic_id=$NIC_ID" >> "$GITHUB_OUTPUT"
+
+          # If the NIC already has an NSG attached, only continue if
+          # it is OUR managed NSG. Otherwise abort — we don't want to
+          # silently replace a human's manual Portal action.
+          EXISTING_NSG_ID=$(az network nic show --ids "$NIC_ID" \
+            --query "networkSecurityGroup.id" -o tsv 2>/dev/null || true)
+          if [ -n "$EXISTING_NSG_ID" ]; then
+            EXISTING_NSG_NAME=$(basename "$EXISTING_NSG_ID")
+            if [ "$EXISTING_NSG_NAME" != "$NSG_NAME" ]; then
+              echo "ERROR: NIC already has a DIFFERENT NSG attached: $EXISTING_NSG_NAME"
+              echo "Refusing to replace. Inspect manually before re-running."
+              exit 1
+            fi
+            echo "NIC already has our managed NSG ($NSG_NAME) attached — will ensure rules + continue."
+          else
+            echo "NIC has no NSG — will create and attach."
+          fi
+
+      # -------------------------------------------------------------
+      # Step 4: create the NSG. `nsg create` is idempotent — if one
+      # already exists with this name in the RG, Azure returns the
+      # existing object unchanged.
+      # -------------------------------------------------------------
+      - name: Ensure NSG exists (idempotent)
+        run: |
+          set -eu
+          az network nsg create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$NSG_NAME" \
+            --location "${{ steps.resolve.outputs.location }}" \
+            --tags managed-by=github-actions purpose=starky-auth-vm \
+            -o table
+
+      # -------------------------------------------------------------
+      # Step 5a: Allow-HTTP rule (priority 100).
+      # Check-then-create pattern: `rule create` errors on conflict,
+      # so we only call it when `rule show` reports the rule missing.
+      # This avoids ever overwriting a human-edited rule.
+      # -------------------------------------------------------------
+      - name: Ensure Allow-HTTP (TCP 80 from Internet) exists
+        run: |
+          set -eu
+          if az network nsg rule show \
+               -g "$RESOURCE_GROUP" --nsg-name "$NSG_NAME" -n Allow-HTTP \
+               >/dev/null 2>&1; then
+            echo "rule Allow-HTTP already exists — leaving as is."
+          else
+            az network nsg rule create \
+              --resource-group "$RESOURCE_GROUP" \
+              --nsg-name "$NSG_NAME" \
+              --name Allow-HTTP \
+              --priority 100 \
+              --direction Inbound \
+              --access Allow \
+              --protocol Tcp \
+              --source-address-prefixes Internet \
+              --source-port-ranges '*' \
+              --destination-address-prefixes '*' \
+              --destination-port-ranges 80 \
+              --description "Allow inbound HTTP for Let's Encrypt HTTP-01 challenge and HTTP->HTTPS redirect via Caddy" \
+              -o table
+          fi
+
+      # -------------------------------------------------------------
+      # Step 5b: Allow-HTTPS rule (priority 110).
+      # -------------------------------------------------------------
+      - name: Ensure Allow-HTTPS (TCP 443 from Internet) exists
+        run: |
+          set -eu
+          if az network nsg rule show \
+               -g "$RESOURCE_GROUP" --nsg-name "$NSG_NAME" -n Allow-HTTPS \
+               >/dev/null 2>&1; then
+            echo "rule Allow-HTTPS already exists — leaving as is."
+          else
+            az network nsg rule create \
+              --resource-group "$RESOURCE_GROUP" \
+              --nsg-name "$NSG_NAME" \
+              --name Allow-HTTPS \
+              --priority 110 \
+              --direction Inbound \
+              --access Allow \
+              --protocol Tcp \
+              --source-address-prefixes Internet \
+              --source-port-ranges '*' \
+              --destination-address-prefixes '*' \
+              --destination-port-ranges 443 \
+              --description "Allow inbound HTTPS for end-user auth traffic via Caddy" \
+              -o table
+          fi
+
+      # -------------------------------------------------------------
+      # Step 6: attach the NSG to the NIC. Setting the same NSG again
+      # is a no-op at Azure's side — safe to re-run.
+      # -------------------------------------------------------------
+      - name: Attach NSG to VM NIC
+        run: |
+          set -eu
+          az network nic update \
+            --ids "${{ steps.resolve.outputs.nic_id }}" \
+            --network-security-group "$NSG_NAME" \
+            -o none
+          echo "NIC now references NSG: $NSG_NAME"
+
+      # -------------------------------------------------------------
+      # Step 7: print the resulting state so the run log is a
+      # complete audit trail of what's now in place.
+      # -------------------------------------------------------------
+      - name: Verify — list inbound rules + NIC association
+        run: |
+          set -eu
+          echo "=== Inbound rules on $NSG_NAME ==="
+          az network nsg rule list \
+            -g "$RESOURCE_GROUP" --nsg-name "$NSG_NAME" \
+            --query "[?direction=='Inbound'].{priority:priority, name:name, access:access, proto:protocol, src:sourceAddressPrefix, dstPort:destinationPortRange}" \
+            -o table
+          echo
+          echo "=== NIC association ==="
+          az network nic show \
+            --ids "${{ steps.resolve.outputs.nic_id }}" \
+            --query "{nic: name, nsg: networkSecurityGroup.id}" -o json
+
+      # -------------------------------------------------------------
+      # Step 8: external probe. Any HTTP response code (308 redirect,
+      # 200, 502, anything) means the NSG rule is working. Only a
+      # timeout means it isn't. Caddy running on the VM will redirect
+      # http → https, which shows up as 308 here — that's the expected
+      # happy path. 50s of retries covers the brief rule-propagation
+      # delay.
+      # -------------------------------------------------------------
+      - name: External reachability — probe http://auth.starkyapp.com/health
+        run: |
+          set -eu
+          for attempt in $(seq 1 10); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+              http://auth.starkyapp.com/health || echo "timeout")
+            echo "Attempt ${attempt}: http://auth.starkyapp.com/health -> ${code}"
+            case "$code" in
+              timeout|000) sleep 5 ;;
+              *) echo "Reachable — NSG rule is working."; exit 0 ;;
+            esac
+          done
+          echo "Still not reachable after ~50s. Review the verify step above."
+          exit 1

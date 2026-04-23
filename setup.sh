@@ -53,7 +53,7 @@ else
 fi
 
 # Runtime directories
-mkdir -p import themes backups
+mkdir -p import backups
 echo "✓ Runtime directories ready"
 
 chmod +x backup.sh setup.sh 2>/dev/null || true

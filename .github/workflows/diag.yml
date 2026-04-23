@@ -141,57 +141,106 @@ jobs:
             -o table
 
       # -------------------------------------------------------------
-      # Confirm DNS target: the VM's public IP. The Caddy error already
-      # showed LE reached 20.167.84.219, but we print the authoritative
-      # Azure record so we know nothing has drifted since.
+      # Confirm DNS target AND public IP SKU.
+      #
+      # Why SKU matters: in modern Azure, the default public IP SKU is
+      # "Standard". A Standard-SKU PIP is **secure-by-default** — it
+      # implicitly DENIES all inbound traffic from the internet unless
+      # an NSG explicitly allows it. A Basic-SKU PIP defaults the other
+      # way (allow-all). The first diag run showed no NSG at NIC or
+      # subnet level, so if the PIP is Standard, that alone explains
+      # the connect-timeout from Let's Encrypt. We need to see the SKU
+      # to pick the right fix (add NSG rules vs. something else).
+      # This step is READ-ONLY (`show` command).
       # -------------------------------------------------------------
-      - name: Show VM public IP
+      - name: Show VM public IP + SKU
         run: |
           set -eu
           echo "=== Public IPs in the resource group ==="
           az network public-ip list -g "$RESOURCE_GROUP" \
-            --query "[].{name:name, ip:ipAddress, assoc:ipConfiguration.id}" \
+            --query "[].{name:name, ip:ipAddress, sku:sku.name, tier:sku.tier, assoc:ipConfiguration.id}" \
             -o table
+          echo
+          echo "=== Detail: pip-starky-auth-prod ==="
+          az network public-ip show -g "$RESOURCE_GROUP" -n pip-starky-auth-prod \
+            --query "{name:name, sku:sku, allocation:publicIpAllocationMethod, version:publicIpAddressVersion}" \
+            -o json
 
       # -------------------------------------------------------------
-      # Inside-the-VM view via Azure's run-command (no SSH). All three
-      # commands here are READ-ONLY:
-      #   - `ss -tlnp`   : list TCP listening sockets
-      #   - `docker ps`  : list running containers
-      #   - `docker inspect` : read health state
-      #   - `docker logs --tail` : read the last few log lines
-      # If the VM is listening on 0.0.0.0:80 + 0.0.0.0:443, then any
-      # timeout from the internet is definitely an NSG problem. If it is
-      # NOT listening there, the problem is inside the VM instead.
+      # Inside-the-VM view via Azure's run-command (no SSH). Each of
+      # the sub-steps below runs a DIFFERENT run-command invocation
+      # with a SMALL script — because run-command caps the returned
+      # message and our previous single-big-script got truncated from
+      # the front (the last ~4KB of verbose Caddy logs crowded out the
+      # ss/ufw/docker-ps output we actually needed).
+      #
+      # All commands below are READ-ONLY:
+      #   - ss / netstat : list TCP listening sockets
+      #   - ufw status   : read firewall state
+      #   - docker ps    : list running containers (no change)
+      #   - docker inspect : read container health (no change)
+      # Nothing is written, no container is restarted, no rule added.
       # -------------------------------------------------------------
-      - name: Inside-the-VM listen state + container health (read-only)
+      - name: VM — host TCP listen sockets
         run: |
           set -eu
-          DIAG_SCRIPT='
+          SCRIPT='
           echo "=== uname + uptime ==="
           uname -a; uptime
           echo
-          echo "=== UFW status (may be inactive — thats expected) ==="
-          (ufw status 2>/dev/null || echo "ufw not installed")
-          echo
-          echo "=== Host TCP listen sockets ==="
+          echo "=== Host TCP listen sockets (who is bound to which port on the host netns) ==="
           ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "neither ss nor netstat available"
+          '
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$SCRIPT" \
+            --query "value[0].message" -o tsv
+
+      - name: VM — UFW + iptables state
+        run: |
+          set -eu
+          # Looks at both UFW (if installed) and the raw filter chain.
+          # If UFW is active and denies 80/443, that is the root cause
+          # and the Azure-layer fix we were considering is irrelevant.
+          SCRIPT='
+          echo "=== UFW status ==="
+          if command -v ufw >/dev/null 2>&1; then
+            ufw status verbose 2>/dev/null || ufw status 2>/dev/null || echo "ufw command failed"
+          else
+            echo "ufw not installed"
+          fi
           echo
+          echo "=== iptables INPUT chain (policy + rules) ==="
+          iptables -S INPUT 2>/dev/null | head -40 || echo "cannot read iptables"
+          echo
+          echo "=== iptables nat PREROUTING (shows Docker port forwards) ==="
+          iptables -t nat -S PREROUTING 2>/dev/null | head -40 || echo "cannot read iptables nat"
+          '
+          az vm run-command invoke \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts "$SCRIPT" \
+            --query "value[0].message" -o tsv
+
+      - name: VM — docker ps + keycloak health
+        run: |
+          set -eu
+          SCRIPT='
           echo "=== docker ps ==="
           docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
           echo
           echo "=== keycloak-server health ==="
           docker inspect --format "{{.State.Health.Status}}" keycloak-server 2>/dev/null || echo "not running"
           echo
-          echo "=== keycloak-server last 20 health probes ==="
-          docker inspect --format "{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{println}}{{end}}" keycloak-server 2>/dev/null | tail -20 || true
-          echo
-          echo "=== keycloak-caddy last 30 log lines ==="
-          docker logs --tail 30 keycloak-caddy 2>&1 || true
+          echo "=== keycloak-server last 10 health probe outputs ==="
+          docker inspect --format "{{range .State.Health.Log}}exit={{.ExitCode}} out={{.Output}}{{println}}{{end}}" keycloak-server 2>/dev/null | tail -10 || true
           '
           az vm run-command invoke \
             --resource-group "$RESOURCE_GROUP" \
             --name "$VM_NAME" \
             --command-id RunShellScript \
-            --scripts "$DIAG_SCRIPT" \
+            --scripts "$SCRIPT" \
             --query "value[0].message" -o tsv

@@ -5,8 +5,15 @@
 # ============================================================
 # Public authentication domain
 # Redirects / to the product site. Proxies realm endpoints to Keycloak.
-# Admin console is BLOCKED here — use the admin subdomain.
-# Master realm is BLOCKED here — not needed for end-user auth.
+# Admin console UI is BLOCKED here — use the admin subdomain.
+#
+# NOTE: master realm endpoints are intentionally NOT blocked here.
+# Keycloak's admin console (on auth-admin) uses the main KC_HOSTNAME
+# for its own OIDC auth flow — so auth-admin redirects the browser to
+# auth.starkyapp.com/realms/master/protocol/openid-connect/auth to log in.
+# Blocking /realms/master/* here breaks that flow with "Something went wrong".
+# Admin UI access is still guarded by the /admin/* block + IP allow-list
+# on the admin hostname.
 # ============================================================
 {$AUTH_HOSTNAME} {
     encode gzip
@@ -17,7 +24,12 @@
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; frame-src 'self'; frame-ancestors 'self'; form-action 'self' https:;"
+        # frame-ancestors allows auth-admin.starkyapp.com because Keycloak's
+        # admin console on that hostname embeds a hidden iframe from this
+        # (public) hostname for silent session-status checks. Without this,
+        # the browser blocks the iframe with CSP violation and the admin
+        # console shows "Something went wrong".
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; frame-src 'self'; frame-ancestors 'self' https://auth-admin.starkyapp.com; form-action 'self' https:;"
         -Server
     }
 
@@ -35,12 +47,6 @@
     @admin path /admin /admin/*
     handle @admin {
         respond "Admin access is not permitted on this domain. Use the admin subdomain." 403
-    }
-
-    # Block master realm on the public domain (end users live in other realms)
-    @master path /realms/master /realms/master/*
-    handle @master {
-        respond "Not found" 404
     }
 
     # Everything else → Keycloak

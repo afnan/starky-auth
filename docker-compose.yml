@@ -94,7 +94,22 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' | nc localhost 9000 | grep -q UP"]
+      # Keycloak 26's image is built on ubi9-micro, which ships neither
+      # `nc` nor `curl` nor `wget`. Any probe that shells out to an
+      # external HTTP client will fail with "command not found". Use
+      # bash's built-in /dev/tcp pseudo-device instead — it needs no
+      # external binary, only bash (present in the image since /bin/sh
+      # symlinks to bash on ubi9-micro) and `grep` (part of coreutils).
+      #
+      # Sequence:
+      #   1. Open a TCP socket to the Keycloak management port (9000)
+      #      as fd 3. Fails fast if Keycloak isn't listening yet.
+      #   2. Send a minimal HTTP/1.1 GET to /health/ready. The
+      #      `Connection: close` header tells Keycloak to close the
+      #      socket after the response, so grep hits EOF cleanly.
+      #   3. grep for "UP" in the response body — Keycloak returns
+      #      {"status":"UP", ...} when ready. Match → exit 0 (healthy).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
       interval: 30s
       timeout: 10s
       retries: 5

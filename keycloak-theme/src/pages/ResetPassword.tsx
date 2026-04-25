@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -9,6 +10,10 @@ type ResetPasswordKcContext = Extract<KcContext, { pageId: "login-reset-password
 
 export default function ResetPassword({ kcContext }: { kcContext: ResetPasswordKcContext }) {
   const { url } = kcContext;
+
+  useEffect(() => {
+    document.title = "Reset your password · Starky";
+  }, []);
 
   return (
     <AuthBackground>

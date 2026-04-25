@@ -9,7 +9,7 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
   display: "flex",
   flexDirection: "column",
-  gap: "var(--gap-lg, 24px)",
+  gap: "20px",
 };
 
 export default function AuthCard({ children }: { children: ReactNode }) {

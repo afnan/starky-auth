@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -7,6 +8,10 @@ type OtpKcContext = Extract<KcContext, { pageId: "login-otp.ftl" }>;
 
 export default function LoginOtp({ kcContext }: { kcContext: OtpKcContext }) {
   const { url } = kcContext;
+
+  useEffect(() => {
+    document.title = "Verify your identity · Starky";
+  }, []);
 
   return (
     <AuthBackground>

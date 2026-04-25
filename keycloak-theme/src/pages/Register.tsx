@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -20,6 +21,10 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
   const { url } = kcContext;
   const ctx = kcContext as RegisterKcContextWithSocial;
   const googleProvider = ctx.social?.providers?.find((p) => p.alias === "google");
+
+  useEffect(() => {
+    document.title = "Create your account · Starky";
+  }, []);
 
   return (
     <AuthBackground>

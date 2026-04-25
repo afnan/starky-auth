@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import type { CSSProperties } from "react";
 import AuthBackground from "../components/AuthBackground";
@@ -48,6 +49,15 @@ export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
     (headerLower.includes("email") ||
       summaryLower.includes("email") ||
       summaryLower.includes("shortly"));
+
+  useEffect(() => {
+    const title = isSuccess
+      ? "Password reset · Starky"
+      : isEmailSent
+        ? "Check your email · Starky"
+        : "Account · Starky";
+    document.title = title;
+  }, [isSuccess, isEmailSent]);
 
   return (
     <AuthBackground>

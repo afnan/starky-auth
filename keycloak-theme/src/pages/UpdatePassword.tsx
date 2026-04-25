@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import type { CSSProperties } from "react";
 import AuthBackground from "../components/AuthBackground";
@@ -20,6 +21,10 @@ const errorBannerStyle: CSSProperties = {
 
 export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswordKcContext }) {
   const { url, messagesPerField, message } = kcContext;
+
+  useEffect(() => {
+    document.title = "Set a new password · Starky";
+  }, []);
 
   const newPasswordError = messagesPerField.existsError("password-new", "password-confirm")
     ? messagesPerField.get("password-new")

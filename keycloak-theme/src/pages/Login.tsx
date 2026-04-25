@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -11,6 +12,10 @@ type LoginKcContext = Extract<KcContext, { pageId: "login.ftl" }>;
 export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
   const { url, realm, social, login } = kcContext;
   const googleProvider = social?.providers?.find((p) => p.alias === "google");
+
+  useEffect(() => {
+    document.title = "Sign in · Starky";
+  }, []);
 
   return (
     <AuthBackground>

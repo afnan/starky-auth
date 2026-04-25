@@ -20,6 +20,9 @@ ENV KC_CACHE=local
 # Docker build, so the JAR is present in the build context.
 COPY keycloak-theme/dist_keycloak/*.jar /opt/keycloak/providers/
 
+# Vendored third-party SPI JARs (email OTP authenticator, etc.).
+COPY providers/*.jar /opt/keycloak/providers/
+
 RUN /opt/keycloak/bin/kc.sh build
 
 # Runtime stage — slimmer layer with the augmented distribution only.

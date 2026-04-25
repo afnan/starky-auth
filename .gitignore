@@ -29,10 +29,10 @@ caddy_config/
 .DS_Store
 Thumbs.db
 
-# Node / Tailwind build output
+# Node / Keycloakify build output
 node_modules/
-themes/*/login/resources/css/styles.css
-themes/*/login/resources/css/*.min.css
+keycloak-theme/dist/
+keycloak-theme/dist_keycloak/
 
 # Claude Code scratch
 .claude*

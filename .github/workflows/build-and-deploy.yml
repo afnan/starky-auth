@@ -32,20 +32,27 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: themes/starky/package-lock.json
+          cache-dependency-path: keycloak-theme/package-lock.json
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Install theme dependencies
-        working-directory: themes/starky
+        working-directory: keycloak-theme
         run: npm ci
 
-      - name: Build Tailwind CSS
-        working-directory: themes/starky
-        run: npm run build:css
+      - name: Build Keycloakify JAR
+        working-directory: keycloak-theme
+        run: npm run build
 
-      - name: Verify built CSS exists
+      - name: Verify built JAR exists
         run: |
-          test -s themes/starky/login/resources/css/styles.css
-          echo "Built CSS size: $(wc -c < themes/starky/login/resources/css/styles.css) bytes"
+          jar=$(ls keycloak-theme/dist_keycloak/*.jar | head -n1)
+          test -s "$jar"
+          echo "Built JAR: $jar ($(wc -c < "$jar") bytes)"
 
       - name: Azure login (OIDC)
         uses: azure/login@v2

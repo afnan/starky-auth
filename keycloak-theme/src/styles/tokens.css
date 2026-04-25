@@ -1,0 +1,30 @@
+:root {
+  --color-primary: #007bff;
+  --color-primary-hover: #0069d9;
+  --color-text-dark: #0e121b;
+  --color-text-mid: #525866;
+  --color-text-light: #929292;
+  --color-border: #e1e4ea;
+  --color-surface: #ffffff;
+  --color-success: #28a745;
+  --color-error: #dc3545;
+
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --card-width: 482px;
+  --card-radius: 10px;
+  --card-padding: 20px;
+
+  --input-height: 48px;
+  --input-radius: 5px;
+  --input-padding-x: 16px;
+
+  --button-height: 48px;
+  --button-radius: 5px;
+
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 16px;
+  --gap-lg: 24px;
+  --gap-xl: 30px;
+}

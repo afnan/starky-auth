@@ -1,4 +1,4 @@
-# Two-stage Keycloak build — themes + optimized runtime.
+# Two-stage Keycloak build — Keycloakify JAR theme + optimized runtime.
 # See https://www.keycloak.org/server/containers for the recommended pattern.
 
 FROM quay.io/keycloak/keycloak:26.5.5 AS builder
@@ -15,10 +15,10 @@ ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 ENV KC_CACHE=local
 
-# Copy only the production theme directory (not the Tailwind source).
-# The Actions pipeline builds styles.css into themes/starky/login/resources/css/
-# BEFORE this Docker build runs, so the output lands here too.
-COPY themes/starky/login/ /opt/keycloak/themes/starky/login/
+# Drop the Keycloakify-built theme JAR into the providers directory.
+# The Actions pipeline runs `npm run build` in keycloak-theme/ BEFORE this
+# Docker build, so the JAR is present in the build context.
+COPY keycloak-theme/dist_keycloak/*.jar /opt/keycloak/providers/
 
 RUN /opt/keycloak/bin/kc.sh build
 

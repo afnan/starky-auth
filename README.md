@@ -110,7 +110,7 @@ Login: user `admin`, password from `.env`.
 
 1. Admin console → top-left dropdown → **Create realm**
 2. Name it after the client (e.g. `boxe`)
-3. **Realm settings** → **Themes** → choose the login theme you've added under `themes/`
+3. **Realm settings** → **Themes** → **Login Theme** → `starky` (shipped by the Keycloakify JAR baked into the image)
 4. **Clients** → **Create client** → OIDC → set redirect URIs → copy client secret
 
 Integration URL for your app:
@@ -122,16 +122,31 @@ https://auth.yourdomain.com/realms/<realm>/protocol/openid-connect/auth
 
 ## Custom themes
 
-Put themes under `./themes/<name>/login/…` — they're bind-mounted read-only into Keycloak.
-See `themes/README.md` for structure.
+The login theme is a **Keycloakify** React project at `./keycloak-theme/`.
+It compiles into a provider JAR that the `Dockerfile` copies into
+`/opt/keycloak/providers/` before `kc.sh build`. No runtime bind-mount —
+everything is baked into the image.
 
-Development cycle:
+Local preview (no Keycloak instance required):
 ```bash
-# .env: KC_THEME_CACHING=false
-docker compose restart keycloak
-# Edit files, hard-refresh browser
+cd keycloak-theme
+npm install
+npm run dev                 # Keycloakify mock runtime (Storybook-style)
 ```
-Set `KC_THEME_CACHING=true` before production.
+
+Build the JAR locally:
+```bash
+cd keycloak-theme
+npm run build               # requires JDK 17 on PATH (JAVA_HOME set)
+# -> dist_keycloak/keycloak-theme-for-kc-all-other-versions.jar
+```
+
+The GitHub Actions pipeline does the JAR build and then `docker build`, so
+local builds are only for iteration. For full details see
+`docs/superpowers/specs/2026-04-22-keycloak-theme-design.md`.
+
+Theme caching — set `KC_THEME_CACHING=false` in `.env` only during live
+debugging against a running Keycloak; keep it `true` in production.
 
 ---
 
@@ -202,7 +217,8 @@ Keycloak echoes back hostnames from `KC_HOSTNAME`. If you browse directly to the
 ├── caddy/
 │   ├── Caddyfile           # reverse proxy + automatic TLS
 │   └── landing.html        # public landing page (/)
-├── themes/                 # per-realm Keycloak themes
+├── keycloak-theme/         # Keycloakify React project — builds provider JAR
+├── themes/                 # (legacy classic-theme slot — README only)
 ├── import/                 # realm JSON (imported on first boot)
 └── backups/                # pg_dump archives (gitignored)
 ```

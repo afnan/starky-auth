@@ -6,13 +6,22 @@
 # Specs and runbooks
 docs/
 
-# Tailwind source (not needed in image — only login/ gets copied)
-themes/starky/src
-themes/starky/package*.json
-themes/starky/tailwind.config.js
-themes/starky/postcss.config.js
-themes/starky/.gitignore
-themes/starky/node_modules
+# Keycloakify source — only the built JAR enters the image
+keycloak-theme/node_modules
+keycloak-theme/dist
+keycloak-theme/src
+keycloak-theme/public
+keycloak-theme/index.html
+keycloak-theme/package*.json
+keycloak-theme/tsconfig.json
+keycloak-theme/vite*.config.ts
+keycloak-theme/vitest.config.ts
+
+# Intermediate Keycloakify Maven output — keep only dist_keycloak/*.jar
+keycloak-theme/dist_keycloak/src
+keycloak-theme/dist_keycloak/target
+keycloak-theme/dist_keycloak/resources
+keycloak-theme/dist_keycloak/pom.xml
 
 # Secrets and local env
 .env
@@ -27,6 +36,8 @@ backup.sh
 docker-compose.yml
 docker-compose.override.yml*
 caddy/
+themes/
+scripts/
 
 # Backups
 backups/

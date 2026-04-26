@@ -4,13 +4,11 @@ import type { CSSProperties } from "react";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
 import BackButton from "../components/BackButton";
+import verifiedUrl from "../assets/verified.svg";
 
 type InfoKcContext = Extract<KcContext, { pageId: "info.ftl" }>;
 
 const iconWrapperBase: CSSProperties = {
-  width: "63px",
-  height: "60px",
-  borderRadius: "50%",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -18,15 +16,13 @@ const iconWrapperBase: CSSProperties = {
 };
 
 const CheckIcon = () => (
-  <div data-testid="success-icon" style={{ ...iconWrapperBase, backgroundColor: "#e8f5e9" }}>
-    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#28a745" strokeWidth="2.5" aria-hidden="true">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
+  <div data-testid="success-icon" style={iconWrapperBase}>
+    <img src={verifiedUrl} alt="" width={63} height={60} />
   </div>
 );
 
 const EnvelopeIcon = () => (
-  <div style={{ ...iconWrapperBase, backgroundColor: "#e3f0ff" }}>
+  <div style={{ ...iconWrapperBase, width: "63px", height: "60px", borderRadius: "50%", backgroundColor: "#e3f0ff" }}>
     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" aria-hidden="true">
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <polyline points="22 4 12 13 2 4" />
@@ -64,7 +60,7 @@ export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
       <AuthCard>
         <BackButton href={url.loginUrl} />
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", textAlign: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", textAlign: "center" }}>
           {isSuccess && <CheckIcon />}
           {isEmailSent && <EnvelopeIcon />}
 
@@ -90,11 +86,12 @@ export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
             backgroundColor: "var(--color-primary)",
             color: "#fff",
             borderRadius: "var(--button-radius, 5px)",
-            fontWeight: 600,
+            fontSize: "16px",
+            fontWeight: 700,
             textDecoration: "none",
           }}
         >
-          {isSuccess ? "Back to Login" : "Done"}
+          Done
         </a>
       </AuthCard>
     </AuthBackground>

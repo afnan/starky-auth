@@ -14,8 +14,8 @@ const baseStyle: CSSProperties = {
   color: "#fff",
   border: "none",
   borderRadius: "var(--button-radius, 5px)",
-  fontSize: "14px",
-  fontWeight: 600,
+  fontSize: "16px",
+  fontWeight: 700,
   cursor: "pointer",
 };
 

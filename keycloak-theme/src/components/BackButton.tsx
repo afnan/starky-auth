@@ -9,7 +9,7 @@ const style: CSSProperties = {
   cursor: "pointer",
   fontSize: "14px",
   fontWeight: 600,
-  color: "var(--color-text-dark, #0e121b)",
+  color: "var(--color-text-mid, #525866)",
   padding: 0,
   textDecoration: "none",
 };

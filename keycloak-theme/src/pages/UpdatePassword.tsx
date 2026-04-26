@@ -40,10 +40,10 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
         <BackButton href={url.loginUrl} />
 
         <div>
-          <h1 style={{ fontSize: "30px", fontWeight: 700, color: "var(--color-text-dark)", marginBottom: "4px" }}>
+          <h1 style={{ fontSize: "30px", fontWeight: 700, color: "var(--color-text-dark)", lineHeight: "32px", marginBottom: "8px" }}>
             Create New Password
           </h1>
-          <p style={{ color: "var(--color-text-mid)" }}>Enter your new password to complete the reset</p>
+          <p style={{ color: "var(--color-text-mid)", lineHeight: "20px" }}>Enter your new password to complete the reset</p>
         </div>
 
         {message && message.type === "error" && !messagesPerField.existsError("password-new", "password-confirm") && (
@@ -51,7 +51,7 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
         )}
 
         <form aria-label="update-password" method="POST" action={url.loginAction}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             <InputField
               id="password-new"
               label="New Password"
@@ -67,14 +67,14 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
               label="Confirm Password"
               type="password"
               name="password-confirm"
-              placeholder="Confirm new password"
+              placeholder="Re-type password"
               autoComplete="new-password"
               required
               error={confirmPasswordError}
             />
           </div>
 
-          <div style={{ marginTop: "24px" }}>
+          <div style={{ marginTop: "30px" }}>
             <PrimaryButton type="submit">Update Password</PrimaryButton>
           </div>
         </form>

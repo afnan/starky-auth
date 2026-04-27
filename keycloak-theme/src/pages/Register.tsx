@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { CSSProperties } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -17,14 +18,40 @@ type RegisterKcContextWithSocial = RegisterKcContext & {
   };
 };
 
+const errorBannerStyle: CSSProperties = {
+  padding: "12px 16px",
+  backgroundColor: "#fff5f5",
+  border: "1px solid #fed7d7",
+  borderRadius: "var(--input-radius, 5px)",
+  color: "var(--color-error, #dc3545)",
+  fontSize: "14px",
+  lineHeight: "1.5",
+};
+
+const FIELD_NAMES = ["firstName", "lastName", "email", "password", "password-confirm", "termsAccepted"] as const;
+
 export default function Register({ kcContext }: { kcContext: RegisterKcContext }) {
-  const { url } = kcContext;
+  const { url, messagesPerField, message } = kcContext;
   const ctx = kcContext as RegisterKcContextWithSocial;
   const googleProvider = ctx.social?.providers?.find((p) => p.alias === "google");
 
   useEffect(() => {
     document.title = "Create your account · Starky";
   }, []);
+
+  const errorFor = (field: string) =>
+    messagesPerField.existsError(field) ? messagesPerField.get(field) : undefined;
+
+  const firstNameError = errorFor("firstName");
+  const lastNameError = errorFor("lastName");
+  const emailError = errorFor("email");
+  const passwordError = messagesPerField.existsError("password", "password-confirm")
+    ? messagesPerField.getFirstError("password", "password-confirm")
+    : undefined;
+  const termsError = errorFor("termsAccepted");
+
+  const showGlobalError =
+    message?.type === "error" && !messagesPerField.existsError(...FIELD_NAMES);
 
   return (
     <AuthBackground>
@@ -38,16 +65,18 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
           <p style={{ color: "var(--color-text-mid)" }}>Fill the details to create your account</p>
         </div>
 
+        {showGlobalError && <div style={errorBannerStyle}>{message!.summary}</div>}
+
         <form aria-label="register" method="POST" action={url.registrationAction}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-              <InputField id="firstName" label="First Name" type="text" name="firstName" placeholder="First name" required />
-              <InputField id="lastName" label="Last Name" type="text" name="lastName" placeholder="Last name" required />
+              <InputField id="firstName" label="First Name" type="text" name="firstName" placeholder="First name" required error={firstNameError} />
+              <InputField id="lastName" label="Last Name" type="text" name="lastName" placeholder="Last name" required error={lastNameError} />
             </div>
 
-            <InputField id="email" label="Email Address" type="email" name="email" placeholder="Type email" autoComplete="email" required />
+            <InputField id="email" label="Email Address" type="email" name="email" placeholder="Type email" autoComplete="email" required error={emailError} />
 
-            <InputField id="password" label="Password" type="password" name="password" placeholder="Type password" autoComplete="new-password" required />
+            <InputField id="password" label="Password" type="password" name="password" placeholder="Type password" autoComplete="new-password" required error={passwordError} />
 
             <InputField
               id="businessName"
@@ -57,19 +86,25 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
               placeholder="Your business name"
             />
 
-            <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "14px", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                name="termsAccepted"
-                required
-                aria-label="I agree to the Terms & Conditions"
-                style={{ marginTop: "2px", flexShrink: 0 }}
-              />
-              <span style={{ color: "var(--color-text-mid)" }}>
-                I agree to the{" "}
-                <a href="#" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Terms & Conditions</a>
-              </span>
-            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "14px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  name="termsAccepted"
+                  required
+                  aria-label="I agree to the Terms & Conditions"
+                  aria-invalid={termsError ? "true" : undefined}
+                  style={{ marginTop: "2px", flexShrink: 0 }}
+                />
+                <span style={{ color: "var(--color-text-mid)" }}>
+                  I agree to the{" "}
+                  <a href="#" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Terms & Conditions</a>
+                </span>
+              </label>
+              {termsError && (
+                <span style={{ fontSize: "12px", color: "var(--color-error, #dc3545)" }}>{termsError}</span>
+              )}
+            </div>
           </div>
 
           <div style={{ marginTop: "24px" }}>

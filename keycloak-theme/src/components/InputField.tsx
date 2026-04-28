@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ChangeEvent } from "react";
 
 type Props = {
   id: string;
@@ -7,6 +7,8 @@ type Props = {
   type: "text" | "email" | "password";
   name: string;
   defaultValue?: string;
+  value?: string;
+  onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
   placeholder?: string;
   autoComplete?: string;
   error?: string;
@@ -69,6 +71,8 @@ export default function InputField({
   type,
   name,
   defaultValue,
+  value,
+  onChange,
   placeholder,
   autoComplete,
   error,
@@ -77,6 +81,7 @@ export default function InputField({
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = type === "password";
   const resolvedType = isPassword && showPassword ? "text" : type;
+  const isControlled = value !== undefined;
 
   return (
     <div style={wrapperStyle}>
@@ -88,7 +93,7 @@ export default function InputField({
           id={id}
           name={name}
           type={resolvedType}
-          defaultValue={defaultValue}
+          {...(isControlled ? { value, onChange } : { defaultValue })}
           placeholder={placeholder}
           autoComplete={autoComplete}
           required={required}

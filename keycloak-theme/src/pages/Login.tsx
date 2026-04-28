@@ -28,15 +28,21 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
     document.title = "Sign in · Starky";
   }, []);
 
-  const usernameError = messagesPerField.existsError("username")
-    ? messagesPerField.get("username")
-    : undefined;
-  const passwordError = messagesPerField.existsError("password")
-    ? messagesPerField.get("password")
-    : undefined;
+  const usernameMsg = messagesPerField.existsError("username") ? messagesPerField.get("username") : "";
+  const passwordMsg = messagesPerField.existsError("password") ? messagesPerField.get("password") : "";
 
-  const showGlobalError =
-    message?.type === "error" && !messagesPerField.existsError("username", "password");
+  // Keycloak attaches the same "invalid credentials" message to both fields.
+  // Collapse that case into a single banner; keep per-field text only when errors differ.
+  const isCredentialError = !!usernameMsg && usernameMsg === passwordMsg;
+
+  const usernameError = isCredentialError ? undefined : usernameMsg || undefined;
+  const passwordError = isCredentialError ? undefined : passwordMsg || undefined;
+
+  const bannerText = isCredentialError
+    ? usernameMsg
+    : !usernameMsg && !passwordMsg && message?.type === "error"
+      ? message.summary
+      : undefined;
 
   return (
     <AuthBackground>
@@ -48,7 +54,7 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
           <p style={{ color: "var(--color-text-mid)" }}>Login to your account</p>
         </div>
 
-        {showGlobalError && <div style={errorBannerStyle}>{message!.summary}</div>}
+        {bannerText && <div style={errorBannerStyle}>{bannerText}</div>}
 
         <form aria-label="login" method="POST" action={url.loginAction}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>

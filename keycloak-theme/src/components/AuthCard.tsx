@@ -12,9 +12,9 @@ const cardStyle: CSSProperties = {
   gap: "20px",
 };
 
-export default function AuthCard({ children }: { children: ReactNode }) {
+export default function AuthCard({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div className="auth-card" style={cardStyle}>
+    <div className="auth-card" style={{ ...cardStyle, ...style }}>
       {children}
     </div>
   );

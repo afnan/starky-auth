@@ -30,7 +30,6 @@ export default function GoogleButton({ href }: { href: string }) {
   return (
     <a href={href} style={style}>
       <GoogleIcon />
-      Continue with Google
     </a>
   );
 }

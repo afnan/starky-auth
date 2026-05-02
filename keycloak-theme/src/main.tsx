@@ -40,6 +40,42 @@ const pageMap: Record<PageKey, { pageId: string; label: string }> = {
   "email-otp": { pageId: "login-email-otp.ftl", label: "Email OTP" },
 };
 
+// Dev-only: rewrite the URL fields the components consume so anchor links
+// land on the right preview page instead of mock placeholders ("#").
+const devUrlOverrides = {
+  loginUrl: "?page=login",
+  loginResetCredentialsUrl: "?page=reset",
+  registrationUrl: "?page=register",
+  loginRestartFlowUrl: "?page=reset",
+};
+
+// Dev-only: where each page's form submission should land, mirroring the
+// real Keycloak flow as closely as possible. Forms post to url.loginAction
+// in production; here we intercept submit and navigate instead.
+const formNextPage: Record<PageKey, PageKey> = {
+  login: "info-success",
+  register: "info-success",
+  reset: "info-email",
+  update: "info-success",
+  info: "login",
+  "info-success": "login",
+  "info-email": "login",
+  otp: "info-success",
+  "email-otp": "info-success",
+};
+
+function installDevFormInterceptor(pageKey: PageKey) {
+  document.addEventListener(
+    "submit",
+    (e) => {
+      e.preventDefault();
+      const next = formNextPage[pageKey];
+      if (next) window.location.assign(`?page=${next}`);
+    },
+    { capture: true },
+  );
+}
+
 function renderDevNav(active: PageKey) {
   const nav = document.createElement("div");
   nav.style.cssText =
@@ -64,7 +100,7 @@ if (kcContext === undefined && import.meta.env.DEV) {
   if (entry.pageId === "login-email-otp.ftl") {
     const mock = {
       pageId: "login-email-otp.ftl" as const,
-      url: { loginAction: "#" },
+      url: { loginAction: "#", ...devUrlOverrides },
       messagesPerField: {
         existsError: () => false,
         get: () => "",
@@ -82,6 +118,7 @@ if (kcContext === undefined && import.meta.env.DEV) {
       </StrictMode>
     );
     renderDevNav(pageKey);
+    installDevFormInterceptor(pageKey);
   } else {
     import("keycloakify/login/KcContext")
       .then(({ createGetKcContextMock }) => {
@@ -102,11 +139,12 @@ if (kcContext === undefined && import.meta.env.DEV) {
               {
                 alias: "google",
                 displayName: "Google",
-                loginUrl: "#",
+                loginUrl: "?page=info-success",
                 providerId: "google",
               },
             ],
           },
+          url: devUrlOverrides,
         };
 
         // Info page has multiple visual states; key off the dev URL alias.
@@ -131,6 +169,7 @@ if (kcContext === undefined && import.meta.env.DEV) {
           </StrictMode>
         );
         renderDevNav(pageKey);
+        installDevFormInterceptor(pageKey);
       })
       .catch(() => {
         document.getElementById("root")!.textContent =

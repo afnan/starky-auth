@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
 import BackButton from "../components/BackButton";
+import ConfirmEmail from "./ConfirmEmail";
 import verifiedUrl from "../assets/verified.svg";
 
 type InfoKcContext = Extract<KcContext, { pageId: "info.ftl" }>;
@@ -21,14 +22,18 @@ const CheckIcon = () => (
   </div>
 );
 
-const EnvelopeIcon = () => (
-  <div style={{ ...iconWrapperBase, width: "63px", height: "60px", borderRadius: "50%", backgroundColor: "#e3f0ff" }}>
-    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" aria-hidden="true">
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <polyline points="22 4 12 13 2 4" />
-    </svg>
-  </div>
-);
+const doneButtonStyle: CSSProperties = {
+  display: "block",
+  textAlign: "center",
+  height: "var(--button-height, 48px)",
+  lineHeight: "var(--button-height, 48px)",
+  backgroundColor: "var(--color-primary)",
+  color: "#fff",
+  borderRadius: "var(--button-radius, 5px)",
+  fontSize: "16px",
+  fontWeight: 700,
+  textDecoration: "none",
+};
 
 export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
   const { url, messageHeader, message, actionUri } = kcContext;
@@ -47,13 +52,38 @@ export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
       summaryLower.includes("shortly"));
 
   useEffect(() => {
-    const title = isSuccess
-      ? "Password reset · Starky"
-      : isEmailSent
-        ? "Check your email · Starky"
-        : "Account · Starky";
+    if (isEmailSent) return; // ConfirmEmail sets its own title
+    const title = isSuccess ? "Password reset · Starky" : "Account · Starky";
     document.title = title;
   }, [isSuccess, isEmailSent]);
+
+  if (isEmailSent) {
+    return <ConfirmEmail loginUrl={url.loginUrl} resendUrl={url.loginRestartFlowUrl} />;
+  }
+
+  // 0.6 Reset Password – Success: single Done button that returns to Login (0.1).
+  // Per spec, the success screen has no Back link and Done always navigates to login,
+  // not the OIDC actionUri continuation.
+  if (isSuccess) {
+    return (
+      <AuthBackground>
+        <AuthCard>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", textAlign: "center" }}>
+            <CheckIcon />
+            <div>
+              <h1 style={{ fontSize: "30px", fontWeight: 700, color: "var(--color-text-dark)", marginBottom: "8px" }}>
+                Great
+              </h1>
+              <p style={{ color: "var(--color-text-mid)" }}>Your password has been reset successfully!</p>
+            </div>
+          </div>
+          <a href={url.loginUrl} style={doneButtonStyle}>
+            Done
+          </a>
+        </AuthCard>
+      </AuthBackground>
+    );
+  }
 
   return (
     <AuthBackground>
@@ -61,36 +91,15 @@ export default function Info({ kcContext }: { kcContext: InfoKcContext }) {
         <BackButton href={url.loginUrl} />
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", textAlign: "center" }}>
-          {isSuccess && <CheckIcon />}
-          {isEmailSent && <EnvelopeIcon />}
-
           <div>
             <h1 style={{ fontSize: "30px", fontWeight: 700, color: "var(--color-text-dark)", marginBottom: "8px" }}>
-              {isSuccess ? "Great" : isEmailSent ? "Check your email" : (messageHeader ?? "Information")}
+              {messageHeader ?? "Information"}
             </h1>
-            <p style={{ color: "var(--color-text-mid)" }}>
-              {isSuccess
-                ? "Your password has been reset successfully!"
-                : (message?.summary ?? "")}
-            </p>
+            <p style={{ color: "var(--color-text-mid)" }}>{message?.summary ?? ""}</p>
           </div>
         </div>
 
-        <a
-          href={actionUri ?? url.loginUrl}
-          style={{
-            display: "block",
-            textAlign: "center",
-            height: "var(--button-height, 48px)",
-            lineHeight: "var(--button-height, 48px)",
-            backgroundColor: "var(--color-primary)",
-            color: "#fff",
-            borderRadius: "var(--button-radius, 5px)",
-            fontSize: "16px",
-            fontWeight: 700,
-            textDecoration: "none",
-          }}
-        >
+        <a href={actionUri ?? url.loginUrl} style={doneButtonStyle}>
           Done
         </a>
       </AuthCard>

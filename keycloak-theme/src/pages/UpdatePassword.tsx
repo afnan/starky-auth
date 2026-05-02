@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import type { CSSProperties } from "react";
 import AuthBackground from "../components/AuthBackground";
@@ -6,6 +7,8 @@ import AuthCard from "../components/AuthCard";
 import InputField from "../components/InputField";
 import PrimaryButton from "../components/PrimaryButton";
 import BackButton from "../components/BackButton";
+import InfoPopover from "../components/InfoPopover";
+import { PASSWORD_RULES, getFirstPasswordError, isPasswordValid, passwordsMatch } from "../lib/password";
 
 type UpdatePasswordKcContext = Extract<KcContext, { pageId: "login-update-password.ftl" }>;
 
@@ -19,20 +22,58 @@ const errorBannerStyle: CSSProperties = {
   lineHeight: "1.5",
 };
 
+const requirementsListStyle: CSSProperties = {
+  listStyle: "disc",
+  padding: "0 0 0 18px",
+  margin: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: "2px",
+};
+
+const PasswordRequirements = () => (
+  <ul style={requirementsListStyle}>
+    {PASSWORD_RULES.map((rule) => (
+      <li key={rule.id}>{rule.text}</li>
+    ))}
+  </ul>
+);
+
 export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswordKcContext }) {
   const { url, messagesPerField, message } = kcContext;
+
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   useEffect(() => {
     document.title = "Set a new password · Starky";
   }, []);
 
-  const newPasswordError = messagesPerField.existsError("password-new", "password-confirm")
+  const matches = passwordsMatch(password, confirm);
+  const formValid = isPasswordValid(password) && matches;
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!formValid) {
+      e.preventDefault();
+      setSubmitAttempted(true);
+    }
+  };
+
+  // Server-supplied errors win. Otherwise, on a failed submit, surface the first
+  // failing rule's message — sequentially: length → digit → uppercase.
+  const serverNewError = messagesPerField.existsError("password-new", "password-confirm")
     ? messagesPerField.get("password-new")
     : undefined;
+  const newPasswordError =
+    serverNewError ?? (submitAttempted ? getFirstPasswordError(password) : undefined);
 
-  const confirmPasswordError = messagesPerField.existsError("password-confirm")
+  const serverConfirmError = messagesPerField.existsError("password-confirm")
     ? messagesPerField.get("password-confirm")
     : undefined;
+  const confirmPasswordError =
+    serverConfirmError ??
+    (submitAttempted && isPasswordValid(password) && !matches ? "Passwords do not match" : undefined);
 
   return (
     <AuthBackground>
@@ -50,8 +91,8 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
           <div style={errorBannerStyle}>{message.summary}</div>
         )}
 
-        <form aria-label="update-password" method="POST" action={url.loginAction}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <form aria-label="update-password" method="POST" action={url.loginAction} onSubmit={handleSubmit} noValidate>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <InputField
               id="password-new"
               label="New Password"
@@ -60,7 +101,14 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
               placeholder="Type new password"
               autoComplete="new-password"
               required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               error={newPasswordError}
+              labelExtra={
+                <InfoPopover triggerLabel="Show password requirements">
+                  <PasswordRequirements />
+                </InfoPopover>
+              }
             />
             <InputField
               id="password-confirm"
@@ -70,6 +118,8 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
               placeholder="Re-type password"
               autoComplete="new-password"
               required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
               error={confirmPasswordError}
             />
           </div>

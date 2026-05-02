@@ -117,7 +117,7 @@ export default function EmailOtp({ kcContext }: { kcContext: EmailOtpKcContext }
           {deviceTrustEnabled && (
             <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "16px", fontSize: "14px", color: "var(--color-text-mid)", cursor: "pointer" }}>
               <input type="checkbox" name="trust-device" value="true" />
-              <span>Don't ask for a code on this device again</span>
+              <span>Don't ask for a code on this device for 30 days</span>
             </label>
           )}
 

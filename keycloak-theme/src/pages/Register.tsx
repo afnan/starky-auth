@@ -9,7 +9,7 @@ import GoogleButton from "../components/GoogleButton";
 import BackButton from "../components/BackButton";
 import Divider from "../components/Divider";
 import InfoPopover from "../components/InfoPopover";
-import { PASSWORD_RULES, getFirstPasswordError, isPasswordValid } from "../lib/password";
+import { PASSWORD_RULES, getFirstPasswordError } from "../lib/password";
 
 type RegisterKcContext = Extract<KcContext, { pageId: "register.ftl" }>;
 
@@ -31,6 +31,10 @@ const errorBannerStyle: CSSProperties = {
 };
 
 const FIELD_NAMES = ["firstName", "lastName", "email", "password", "password-confirm", "termsAccepted"] as const;
+
+// Permissive enough to catch typos (requires "@" and a "."); the server still
+// does the authoritative check.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const requirementsListStyle: CSSProperties = {
   listStyle: "disc",
@@ -54,15 +58,33 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
   const ctx = kcContext as RegisterKcContextWithSocial;
   const googleProvider = ctx.social?.providers?.find((p) => p.alias === "google");
 
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
   useEffect(() => {
     document.title = "Create your account · Starky";
   }, []);
 
+  const clientErrors = {
+    firstName: firstName.trim() ? undefined : "First name is required",
+    lastName: lastName.trim() ? undefined : "Last name is required",
+    email: !email.trim()
+      ? "Email is required"
+      : !EMAIL_REGEX.test(email.trim())
+        ? "Enter a valid email address"
+        : undefined,
+    password: getFirstPasswordError(password, email.trim()),
+    terms: termsAccepted ? undefined : "You must accept the Terms & Conditions",
+  };
+
+  const isFormValid = Object.values(clientErrors).every((err) => !err);
+
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    if (!isPasswordValid(password)) {
+    if (!isFormValid) {
       e.preventDefault();
       setSubmitAttempted(true);
     }
@@ -71,18 +93,18 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
   const errorFor = (field: string) =>
     messagesPerField.existsError(field) ? messagesPerField.get(field) : undefined;
 
-  const firstNameError = errorFor("firstName");
-  const lastNameError = errorFor("lastName");
-  const emailError = errorFor("email");
+  // Server-side errors win; otherwise after a failed submit, surface the
+  // client-side message so the user sees one corrective hint per field.
+  const firstNameError = errorFor("firstName") ?? (submitAttempted ? clientErrors.firstName : undefined);
+  const lastNameError = errorFor("lastName") ?? (submitAttempted ? clientErrors.lastName : undefined);
+  const emailError = errorFor("email") ?? (submitAttempted ? clientErrors.email : undefined);
 
-  // Server-side errors win; otherwise on a failed submit, surface the first
-  // failing rule's message so the user fixes one issue at a time.
   const serverPasswordError = messagesPerField.existsError("password", "password-confirm")
     ? messagesPerField.getFirstError("password", "password-confirm")
     : undefined;
   const passwordError =
-    serverPasswordError ?? (submitAttempted ? getFirstPasswordError(password) : undefined);
-  const termsError = errorFor("termsAccepted");
+    serverPasswordError ?? (submitAttempted ? clientErrors.password : undefined);
+  const termsError = errorFor("termsAccepted") ?? (submitAttempted ? clientErrors.terms : undefined);
 
   const showGlobalError =
     message?.type === "error" && !messagesPerField.existsError(...FIELD_NAMES);
@@ -104,11 +126,42 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
         <form aria-label="register" method="POST" action={url.registrationAction} onSubmit={handleSubmit} noValidate>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-              <InputField id="firstName" label="First Name" type="text" name="firstName" placeholder="Type first name" required error={firstNameError} />
-              <InputField id="lastName" label="Last Name" type="text" name="lastName" placeholder="Type last name" required error={lastNameError} />
+              <InputField
+                id="firstName"
+                label="First Name"
+                type="text"
+                name="firstName"
+                placeholder="Type first name"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                error={firstNameError}
+              />
+              <InputField
+                id="lastName"
+                label="Last Name"
+                type="text"
+                name="lastName"
+                placeholder="Type last name"
+                required
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                error={lastNameError}
+              />
             </div>
 
-            <InputField id="email" label="Email Address" type="email" name="email" placeholder="Type email" autoComplete="email" required error={emailError} />
+            <InputField
+              id="email"
+              label="Email Address"
+              type="email"
+              name="email"
+              placeholder="Type email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              error={emailError}
+            />
 
             <InputField
               id="password"
@@ -145,6 +198,8 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
                   required
                   aria-label="I agree to the Terms & Conditions"
                   aria-invalid={termsError ? "true" : undefined}
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
                   style={{ marginTop: "2px", flexShrink: 0 }}
                 />
                 <span style={{ color: "var(--color-text-mid)" }}>

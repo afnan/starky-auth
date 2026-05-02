@@ -7,8 +7,8 @@ import AuthCard from "../components/AuthCard";
 import InputField from "../components/InputField";
 import PrimaryButton from "../components/PrimaryButton";
 import BackButton from "../components/BackButton";
-import InfoPopover from "../components/InfoPopover";
-import { PASSWORD_RULES, getFirstPasswordError, isPasswordValid, passwordsMatch } from "../lib/password";
+import PasswordPolicyPanel from "../components/PasswordPolicyPanel";
+import { getFirstPasswordError, isPasswordValid, passwordsMatch } from "../lib/password";
 
 type UpdatePasswordKcContext = Extract<KcContext, { pageId: "login-update-password.ftl" }>;
 
@@ -22,25 +22,9 @@ const errorBannerStyle: CSSProperties = {
   lineHeight: "1.5",
 };
 
-const requirementsListStyle: CSSProperties = {
-  listStyle: "disc",
-  padding: "0 0 0 18px",
-  margin: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: "2px",
-};
-
-const PasswordRequirements = () => (
-  <ul style={requirementsListStyle}>
-    {PASSWORD_RULES.map((rule) => (
-      <li key={rule.id}>{rule.text}</li>
-    ))}
-  </ul>
-);
-
 export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswordKcContext }) {
-  const { url, messagesPerField, message } = kcContext;
+  const { url, messagesPerField, message, auth } = kcContext;
+  const identity = auth?.attemptedUsername;
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -51,7 +35,7 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
   }, []);
 
   const matches = passwordsMatch(password, confirm);
-  const formValid = isPasswordValid(password) && matches;
+  const formValid = isPasswordValid(password, identity) && matches;
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     if (!formValid) {
@@ -61,19 +45,21 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
   };
 
   // Server-supplied errors win. Otherwise, on a failed submit, surface the first
-  // failing rule's message — sequentially: length → digit → uppercase.
+  // failing rule's message in the order defined by PASSWORD_RULES.
   const serverNewError = messagesPerField.existsError("password-new", "password-confirm")
     ? messagesPerField.get("password-new")
     : undefined;
   const newPasswordError =
-    serverNewError ?? (submitAttempted ? getFirstPasswordError(password) : undefined);
+    serverNewError ?? (submitAttempted ? getFirstPasswordError(password, identity) : undefined);
 
   const serverConfirmError = messagesPerField.existsError("password-confirm")
     ? messagesPerField.get("password-confirm")
     : undefined;
   const confirmPasswordError =
     serverConfirmError ??
-    (submitAttempted && isPasswordValid(password) && !matches ? "Passwords do not match" : undefined);
+    (submitAttempted && isPasswordValid(password, identity) && !matches
+      ? "Passwords do not match"
+      : undefined);
 
   return (
     <AuthBackground>
@@ -104,12 +90,10 @@ export default function UpdatePassword({ kcContext }: { kcContext: UpdatePasswor
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               error={newPasswordError}
-              labelExtra={
-                <InfoPopover triggerLabel="Show password requirements">
-                  <PasswordRequirements />
-                </InfoPopover>
-              }
             />
+
+            <PasswordPolicyPanel password={password} identity={identity} />
+
             <InputField
               id="password-confirm"
               label="Confirm Password"

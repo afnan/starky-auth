@@ -151,7 +151,7 @@ export default function InputField({
               padding: 0,
             }}
           >
-            {showPassword ? <EyeClosedIcon /> : <EyeOpenIcon />}
+            {showPassword ? <EyeOpenIcon /> : <EyeClosedIcon />}
           </button>
         )}
       </div>

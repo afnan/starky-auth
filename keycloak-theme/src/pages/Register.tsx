@@ -62,6 +62,7 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [businessName, setBusinessName] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
@@ -69,6 +70,7 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
     document.title = "Create your account · Starky";
   }, []);
 
+  const trimmedBusinessName = businessName.trim();
   const clientErrors = {
     firstName: firstName.trim() ? undefined : "First name is required",
     lastName: lastName.trim() ? undefined : "Last name is required",
@@ -78,6 +80,10 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
         ? "Enter a valid email address"
         : undefined,
     password: getFirstPasswordError(password, email.trim()),
+    businessName:
+      trimmedBusinessName.length > 0 && trimmedBusinessName.length < 2
+        ? "Business name must be at least 2 characters"
+        : undefined,
     terms: termsAccepted ? undefined : "You must accept the Terms & Conditions",
   };
 
@@ -104,6 +110,7 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
     : undefined;
   const passwordError =
     serverPasswordError ?? (submitAttempted ? clientErrors.password : undefined);
+  const businessNameError = submitAttempted ? clientErrors.businessName : undefined;
   const termsError = errorFor("termsAccepted") ?? (submitAttempted ? clientErrors.terms : undefined);
 
   const showGlobalError =
@@ -188,6 +195,9 @@ export default function Register({ kcContext }: { kcContext: RegisterKcContext }
               type="text"
               name="user.attributes.businessName"
               placeholder="Type business name"
+              value={businessName}
+              onChange={(e) => setBusinessName(e.target.value)}
+              error={businessNameError}
             />
 
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>

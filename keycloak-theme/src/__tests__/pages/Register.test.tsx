@@ -123,6 +123,58 @@ describe("Register page", () => {
     expect(screen.getByText(/enter a valid email address/i)).toBeInTheDocument();
   });
 
+  it("blocks submission with an inline error when business name is a single character", async () => {
+    const user = userEvent.setup();
+    render(<Register kcContext={mockKcContext} />);
+
+    await user.type(screen.getByLabelText(/first name/i), "Ada");
+    await user.type(screen.getByLabelText(/last name/i), "Lovelace");
+    await user.type(screen.getByLabelText(/email address/i), "ada@example.com");
+    await user.type(screen.getByLabelText(/^password$/i, { selector: "input" }), "Abcdefg1!");
+    await user.type(screen.getByLabelText(/business name/i), "A");
+    await user.click(screen.getByRole("checkbox", { name: /terms/i }));
+
+    const propagated = fireEvent.submit(screen.getByRole("form") as HTMLFormElement);
+
+    expect(propagated).toBe(false);
+    expect(screen.getByText(/business name must be at least 2 characters/i)).toBeInTheDocument();
+  });
+
+  it("allows submission when business name is empty (it is optional)", async () => {
+    const user = userEvent.setup();
+    render(<Register kcContext={mockKcContext} />);
+
+    await user.type(screen.getByLabelText(/first name/i), "Ada");
+    await user.type(screen.getByLabelText(/last name/i), "Lovelace");
+    await user.type(screen.getByLabelText(/email address/i), "ada@example.com");
+    await user.type(screen.getByLabelText(/^password$/i, { selector: "input" }), "Abcdefg1!");
+    await user.click(screen.getByRole("checkbox", { name: /terms/i }));
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    fireEvent.submit(form);
+
+    expect(screen.queryByText(/business name must be at least 2 characters/i)).toBeNull();
+  });
+
+  it("allows submission when business name has 2 or more characters", async () => {
+    const user = userEvent.setup();
+    render(<Register kcContext={mockKcContext} />);
+
+    await user.type(screen.getByLabelText(/first name/i), "Ada");
+    await user.type(screen.getByLabelText(/last name/i), "Lovelace");
+    await user.type(screen.getByLabelText(/email address/i), "ada@example.com");
+    await user.type(screen.getByLabelText(/^password$/i, { selector: "input" }), "Abcdefg1!");
+    await user.type(screen.getByLabelText(/business name/i), "AB");
+    await user.click(screen.getByRole("checkbox", { name: /terms/i }));
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    fireEvent.submit(form);
+
+    expect(screen.queryByText(/business name must be at least 2 characters/i)).toBeNull();
+  });
+
   it("allows submission when all client-side validations pass", async () => {
     const user = userEvent.setup();
     render(<Register kcContext={mockKcContext} />);

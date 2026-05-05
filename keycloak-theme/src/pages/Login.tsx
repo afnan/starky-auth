@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import type { KcContext } from "keycloakify/login/KcContext";
 import AuthBackground from "../components/AuthBackground";
 import AuthCard from "../components/AuthCard";
@@ -10,6 +10,8 @@ import Divider from "../components/Divider";
 import ConfirmEmail from "./ConfirmEmail";
 
 type LoginKcContext = Extract<KcContext, { pageId: "login.ftl" }>;
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const errorBannerStyle: CSSProperties = {
   padding: "12px 16px",
@@ -25,9 +27,31 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
   const { url, realm, social, login, messagesPerField, message } = kcContext;
   const googleProvider = social?.providers?.find((p) => p.alias === "google");
 
+  const [username, setUsername] = useState(login.username ?? "");
+  const [password, setPassword] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
   useEffect(() => {
     document.title = "Sign in · Starky";
   }, []);
+
+  const clientErrors = {
+    username: !username.trim()
+      ? "Email is required"
+      : !EMAIL_REGEX.test(username.trim())
+        ? "Enter a valid email address"
+        : undefined,
+    password: password ? undefined : "Password is required",
+  };
+
+  const isFormValid = !clientErrors.username && !clientErrors.password;
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!isFormValid) {
+      e.preventDefault();
+      setSubmitAttempted(true);
+    }
+  };
 
   // Keycloak's reset-credentials flow redirects back to login.ftl with a non-error
   // info/success message ("You should receive an email shortly...") in privacy-mode
@@ -59,8 +83,12 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
   // Collapse that case into a single banner; keep per-field text only when errors differ.
   const isCredentialError = !!usernameMsg && usernameMsg === passwordMsg;
 
-  const usernameError = isCredentialError ? undefined : usernameMsg || undefined;
-  const passwordError = isCredentialError ? undefined : passwordMsg || undefined;
+  const usernameError =
+    (isCredentialError ? undefined : usernameMsg || undefined) ??
+    (submitAttempted ? clientErrors.username : undefined);
+  const passwordError =
+    (isCredentialError ? undefined : passwordMsg || undefined) ??
+    (submitAttempted ? clientErrors.password : undefined);
 
   const bannerText = isCredentialError
     ? usernameMsg
@@ -80,14 +108,15 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
 
         {bannerText && <div style={errorBannerStyle}>{bannerText}</div>}
 
-        <form aria-label="login" method="POST" action={url.loginAction}>
+        <form aria-label="login" method="POST" action={url.loginAction} onSubmit={handleSubmit} noValidate>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <InputField
               id="username"
               label="Email Address"
               type="email"
               name="username"
-              defaultValue={login.username ?? ""}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               placeholder="Type email"
               autoComplete="email"
               required
@@ -98,6 +127,8 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
               label="Password"
               type="password"
               name="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="Type password"
               autoComplete="current-password"
               required

@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { KcContext } from "keycloakify/login/KcContext";
 import Login from "../../pages/Login";
 
@@ -86,5 +87,56 @@ describe("Login page", () => {
     render(<Login kcContext={logoutContext} />);
     expect(screen.getByRole("heading", { name: /^login$/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /confirm email/i })).not.toBeInTheDocument();
+  });
+
+  it("disables native validation popups via noValidate", () => {
+    render(<Login kcContext={mockKcContext} />);
+    expect(screen.getByRole("form")).toHaveAttribute("novalidate");
+  });
+
+  it("blocks submission and shows inline errors when both fields are empty", () => {
+    render(<Login kcContext={mockKcContext} />);
+    const form = screen.getByRole("form") as HTMLFormElement;
+
+    const propagated = fireEvent.submit(form);
+
+    expect(propagated).toBe(false);
+    expect(screen.getByText(/email is required/i)).toBeInTheDocument();
+    expect(screen.getByText(/password is required/i)).toBeInTheDocument();
+  });
+
+  it("blocks submission with an inline error when the email format is invalid", async () => {
+    const user = userEvent.setup();
+    render(<Login kcContext={mockKcContext} />);
+
+    await user.type(screen.getByLabelText(/email address/i, { selector: "input" }), "not-an-email");
+    await user.type(screen.getByLabelText(/password/i, { selector: "input" }), "anything");
+
+    const propagated = fireEvent.submit(screen.getByRole("form") as HTMLFormElement);
+
+    expect(propagated).toBe(false);
+    expect(screen.getByText(/enter a valid email address/i)).toBeInTheDocument();
+  });
+
+  it("does not show inline errors before the user attempts to submit", () => {
+    render(<Login kcContext={mockKcContext} />);
+    expect(screen.queryByText(/email is required/i)).toBeNull();
+    expect(screen.queryByText(/password is required/i)).toBeNull();
+  });
+
+  it("allows submission when both fields are valid", async () => {
+    const user = userEvent.setup();
+    render(<Login kcContext={mockKcContext} />);
+
+    await user.type(screen.getByLabelText(/email address/i, { selector: "input" }), "ada@example.com");
+    await user.type(screen.getByLabelText(/password/i, { selector: "input" }), "anything");
+
+    const form = screen.getByRole("form") as HTMLFormElement;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    fireEvent.submit(form);
+
+    expect(screen.queryByText(/email is required/i)).toBeNull();
+    expect(screen.queryByText(/enter a valid email address/i)).toBeNull();
+    expect(screen.queryByText(/password is required/i)).toBeNull();
   });
 });

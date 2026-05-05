@@ -7,6 +7,7 @@ import InputField from "../components/InputField";
 import PrimaryButton from "../components/PrimaryButton";
 import GoogleButton from "../components/GoogleButton";
 import Divider from "../components/Divider";
+import ConfirmEmail from "./ConfirmEmail";
 
 type LoginKcContext = Extract<KcContext, { pageId: "login.ftl" }>;
 
@@ -27,6 +28,29 @@ export default function Login({ kcContext }: { kcContext: LoginKcContext }) {
   useEffect(() => {
     document.title = "Sign in · Starky";
   }, []);
+
+  // Keycloak's reset-credentials flow redirects back to login.ftl with a non-error
+  // info/success message ("You should receive an email shortly...") in privacy-mode
+  // configurations. Treat that as the 0.4 ConfirmEmail state so the user gets the
+  // expected confirmation screen instead of a silent return to the login form.
+  const summaryLower = (message?.summary ?? "").toLowerCase();
+  const isPostResetEmailSent =
+    !!message &&
+    message.type !== "error" &&
+    summaryLower.includes("email") &&
+    (summaryLower.includes("shortly") ||
+      summaryLower.includes("sent") ||
+      summaryLower.includes("receive") ||
+      summaryLower.includes("instructions"));
+
+  if (isPostResetEmailSent) {
+    return (
+      <ConfirmEmail
+        loginUrl={url.loginUrl}
+        resendUrl={url.loginResetCredentialsUrl ?? url.loginUrl}
+      />
+    );
+  }
 
   const usernameMsg = messagesPerField.existsError("username") ? messagesPerField.get("username") : "";
   const passwordMsg = messagesPerField.existsError("password") ? messagesPerField.get("password") : "";
